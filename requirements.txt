@@ -1,0 +1,11 @@
+# Signal-processing pipeline
+numpy>=2.0
+matplotlib>=3.8
+
+# Web UI (ui/app.py)
+nicegui>=4.0,<5
+latex2mathml>=3.77     # renders the math in the explanation panels, offline
+
+# Tests (python -m pytest ui)
+pytest>=8
+pytest-asyncio>=0.24

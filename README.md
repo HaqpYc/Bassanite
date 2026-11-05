@@ -49,6 +49,21 @@ One — recordings aren't checked into this repo, so bring your own). Requires
 Python 3 + numpy + matplotlib. Runs natively on Windows; no WSL2 needed for offline
 analysis.
 
+## Web UI (in progress)
+
+A local web app walks through the pipeline one tab per stage, with plain-language
+explanations and toggleable math. See [`docs/UI_PLAN.md`](docs/UI_PLAN.md) for the
+full plan; for now it is the shell (navigation, stage status, explanations).
+
+```bash
+pip install -r requirements.txt   # ideally in a virtual environment
+python ui/app.py                  # opens http://localhost:8080
+python -m pytest ui               # UI tests
+```
+
+Explanation texts live in `ui/explain/<stage>/*.md` and are re-read on every page
+load, so you can edit them and refresh the browser.
+
 ## Current status (2026-05-31)
 
 Stages 02 and 03 are working. Stage 02 acquisition finds **6+ genuine GPS
