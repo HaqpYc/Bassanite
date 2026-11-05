@@ -4,7 +4,8 @@ Run it from the repository root:
 
     python ui/app.py
 
-and open http://localhost:8080 (the browser opens on its own).
+and open http://localhost:8080 (your default browser opens on its own; add
+--no-browser to stop that).
 
 Editing:
 - Explanation texts (ui/explain/**/*.md) are re-read on every page load:
@@ -112,4 +113,10 @@ def root() -> None:
 app.on_shutdown(stop_all)   # never leave hackrf_transfer running
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(root, title="Bassanite", port=8080, show=True, reload=False)
+    import argparse
+    parser = argparse.ArgumentParser(description="Bassanite web UI")
+    parser.add_argument("--no-browser", action="store_true",
+                        help="don't open the default browser on start "
+                             "(open http://localhost:8080 yourself)")
+    args, _ = parser.parse_known_args()   # tolerant: pytest runs this file with its own args
+    ui.run(root, title="Bassanite", port=8080, show=not args.no_browser, reload=False)
