@@ -64,8 +64,8 @@ if _ROOT not in sys.path:
 
 from bassanite.provenance import write_meta                    # noqa: E402
 from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
-                                MS_PER_BIT, PROMPT_RATE_HZ, read_seeds,
-                                summarize, track_prn)
+                                DETAIL_KEYS, MS_PER_BIT, PROMPT_RATE_HZ,
+                                read_seeds, summarize, track_prn)
 from common.ca_code import CODE_LENGTH                         # noqa: E402
 from common.iq_loader import load_iq                           # noqa: E402
 
@@ -77,6 +77,8 @@ def save_npz(out_dir, prn, fs, seed, track, bit_offset, symbols, bits, cn0, lock
         # dense 1 kHz streams
         i_prompt=track["i_prompt"], q_prompt=track["q_prompt"],
         doppler_hz=track["doppler_hz"], code_phase_samp=track["code_phase_samp"],
+        # loop internals at 1 kHz: Early/Late correlators and both discriminators
+        **{k: track[k] for k in DETAIL_KEYS if k in track},
         # derived 50 bps stream
         nav_symbols=symbols, nav_bits=bits,
         # 50 Hz block-rate quality
@@ -157,6 +159,8 @@ def main():
                     help="stage-02 acquisition results to seed from")
     ap.add_argument("--prn", type=int, default=None,
                     help="track only this PRN (seed from CSV unless --doppler given)")
+    ap.add_argument("--prns", default=None,
+                    help="track only these detected PRNs, comma-separated (e.g. 5,20,22)")
     ap.add_argument("--doppler", type=float, default=None,
                     help="override Doppler seed (Hz) for --prn")
     ap.add_argument("--code-phase-chips", type=float, default=None,
@@ -169,6 +173,9 @@ def main():
                     help="DLL bandwidth (Hz)")
     ap.add_argument("--out-dir", default=_HERE, help="where to write outputs")
     ap.add_argument("--no-plot", action="store_true", help="skip diagnostic PNGs")
+    ap.add_argument("--progress", action="store_true",
+                    help="print 'PROGRESS <k> <n> <prn> <done_ms> <total_ms>' lines "
+                         "(for the web UI)")
     a = ap.parse_args()
 
     # --- assemble the list of (prn, doppler, code-phase) seeds ------------------
@@ -182,6 +189,9 @@ def main():
             sys.exit(f"no acquisition results at {a.from_csv}; run stage 02 first "
                      f"(python 02_acquisition/scan_prns.py)")
         seeds = read_seeds(a.from_csv, a.fs, only_detected=not a.all)
+        if a.prns:
+            wanted = {int(p) for p in a.prns.split(",") if p.strip()}
+            seeds = [s for s in seeds if s["prn"] in wanted]
         if a.prn is not None:
             seeds = [s for s in seeds if s["prn"] == a.prn]
             if not seeds:
@@ -198,11 +208,21 @@ def main():
           f"(PLL {a.pll_bw:.0f} Hz, DLL {a.dll_bw:.1f} Hz)")
 
     max_ms = None if a.seconds is None else int(a.seconds * 1000)
+    total_ms = int(x.size / a.fs * 1000)
+    if max_ms is not None:
+        total_ms = min(total_ms, max_ms)
     summary = []
-    for s in seeds:
+    for k, s in enumerate(seeds, start=1):
         prn = s["prn"]
+
+        def report(done, total, k=k, prn=prn):
+            print(f"PROGRESS {k} {len(seeds)} {prn} {done} {total}", flush=True)
+
+        if a.progress:
+            report(0, total_ms)
         tr = track_prn(x, a.fs, prn, s["code_phase_samp"], s["doppler_hz"],
-                       pll_bw=a.pll_bw, dll_bw=a.dll_bw, max_ms=max_ms)
+                       pll_bw=a.pll_bw, dll_bw=a.dll_bw, max_ms=max_ms, detail=True,
+                       progress=report if a.progress else None)
         r = summarize(tr)
         if r is None:
             print(f"  PRN {prn:>2}: too few epochs ({len(tr['i_prompt'])}), skipped")

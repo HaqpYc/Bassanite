@@ -31,6 +31,8 @@ LOCK_QI_MAX = 0.3                 # |Q|/|I| below this = carrier phase-locked
 DEFAULT_PLL_BW = 12.0
 DEFAULT_DLL_BW = 1.0
 PROGRESS_EVERY_MS = 1000          # how often track_prn reports progress
+# Extra per-ms arrays track_prn(detail=True) returns (the loops' internals).
+DETAIL_KEYS = ("i_early", "q_early", "i_late", "q_late", "carr_err", "code_err")
 
 
 def calc_loop_coef(bw, zeta, k):
@@ -71,6 +73,29 @@ def fine_doppler(x, fs, ca, code_phase_samp, dop_center, span=200.0, step=25.0,
         if acc > best_pow:
             best_pow, best_dop = acc, float(dop)
     return best_dop
+
+
+def costas_error(ip, qp):
+    """Carrier-phase error in cycles from the prompt correlator (Costas).
+
+    atan(Q/I), not atan2(Q, I): a 180 deg data flip turns (I, Q) into (-I, -Q),
+    which leaves Q/I and so the error unchanged. The loop ignores the data bits.
+    """
+    ip_safe = ip if abs(ip) > 1e-12 else 1e-12
+    return np.arctan(qp / ip_safe) / (2 * np.pi)
+
+
+def dll_error(ie, qe, il, ql):
+    """Code-phase error in chips from the Early and Late correlators.
+
+    Normalised early-minus-late envelope: 0 when early and late are equally
+    strong (prompt centred on the peak). The Early replica reads the code half a
+    chip behind the prompt, so it matches best when our replica runs ahead of the
+    incoming code: a positive error means "replica ahead", and track_prn slows
+    the code NCO down (code_f = ... - code_nco).
+    """
+    e_mag, l_mag = np.hypot(ie, qe), np.hypot(il, ql)
+    return (e_mag - l_mag) / (e_mag + l_mag + 1e-12)
 
 
 def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
@@ -119,8 +144,7 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     dopp = np.zeros(n_ms, dtype=np.float32)
     code_start = np.zeros(n_ms, dtype=np.float64)
     if detail:
-        el = {k: np.zeros(n_ms, dtype=np.float32)
-              for k in ("i_early", "q_early", "i_late", "q_late", "carr_err", "code_err")}
+        el = {k: np.zeros(n_ms, dtype=np.float32) for k in DETAIL_KEYS}
 
     # Code phase is tracked as an integer sample pointer (n0) plus a fractional
     # leftover in CHIPS (rem_code_phase). Each epoch we process exactly enough
@@ -161,8 +185,7 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
 
         # Carrier loop: Costas atan(Q/I) discriminator (cycles) -- blind to the
         # 180 deg flips of the 50 bps data, unlike atan2. Updates carr_f for next.
-        ip_safe = ip if abs(ip) > 1e-12 else 1e-12
-        carr_err = np.arctan(qp / ip_safe) / (2 * np.pi)
+        carr_err = costas_error(ip, qp)
         carr_nco += (tau2_c / tau1_c) * (carr_err - old_carr_err) + carr_err * (PDI / tau1_c)
         old_carr_err = carr_err
         carr_f = carr_freq_basis + carr_nco
@@ -170,8 +193,7 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
         # Code loop: normalized early-minus-late power discriminator (chips).
         code_err = 0.0
         if use_dll:
-            e_mag, l_mag = np.hypot(ie, qe), np.hypot(il, ql)
-            code_err = (e_mag - l_mag) / (e_mag + l_mag + 1e-12)
+            code_err = dll_error(ie, qe, il, ql)
             code_nco += ((tau2_d / tau1_d) * (code_err - old_code_err)
                          + code_err * (PDI / tau1_d))
             old_code_err = code_err
@@ -199,6 +221,23 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     return out
 
 
+def bit_sync_scores(i_prompt):
+    """Energy of the 20 ms sums for each of the 20 possible bit-edge offsets.
+
+    Score of offset o = mean |sum of 20 prompt values| over the bits that start
+    at o, 20 + o, 40 + o, ... A grouping aligned with the real bit edges never
+    straddles a sign flip, so its sums are largest. -1 where no full bit fits.
+    """
+    scores = np.full(MS_PER_BIT, -1.0)
+    for off in range(MS_PER_BIT):
+        usable = (len(i_prompt) - off) // MS_PER_BIT * MS_PER_BIT
+        if usable <= 0:
+            continue
+        seg = i_prompt[off:off + usable].reshape(-1, MS_PER_BIT)
+        scores[off] = float(np.mean(np.abs(seg.sum(axis=1))))
+    return scores
+
+
 def bit_sync(i_prompt):
     """Find the 20 ms navigation-bit boundary and demodulate the 50 bps symbols.
 
@@ -209,15 +248,7 @@ def bit_sync(i_prompt):
 
     Returns (bit_offset, nav_symbols_soft, nav_bits_01).
     """
-    best_off, best_score = 0, -1.0
-    for off in range(MS_PER_BIT):
-        usable = (len(i_prompt) - off) // MS_PER_BIT * MS_PER_BIT
-        if usable <= 0:
-            continue
-        seg = i_prompt[off:off + usable].reshape(-1, MS_PER_BIT)
-        score = float(np.mean(np.abs(seg.sum(axis=1))))
-        if score > best_score:
-            best_score, best_off = score, off
+    best_off = int(np.argmax(bit_sync_scores(i_prompt)))   # first best, as before
 
     usable = (len(i_prompt) - best_off) // MS_PER_BIT * MS_PER_BIT
     seg = i_prompt[best_off:best_off + usable].reshape(-1, MS_PER_BIT)

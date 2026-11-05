@@ -258,6 +258,8 @@ contract between stages, so the UI and the command-line scripts stay interchange
 4. ✅ **Acquisition tab** with "Meet the codes" (shift-register stepper, auto/cross
    correlation), the PRN bar chart, the correlation surface and slices, the Try-it
    sliders (measured against sinc²) and the persistence check with its drift test.
-5. **Tracking tab** with the time scrubber.
+5. ✅ **Tracking tab** with the time scrubber (play, step by bit, window length), the
+   satellite cards, the PLL-bandwidth Try-it, and tracking run as a separate process
+   (`track.py --progress`) whose results replace the old ones only on success.
 6. **Stages 04 and 05:** each backend stage ships with its tab, following the
    five-block layout above.

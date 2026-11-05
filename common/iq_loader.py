@@ -62,7 +62,12 @@ def load_iq(path, fmt="int8", fs=4e6, seconds=None, skip_seconds=0.0,
         raw = np.fromfile(path, dtype=np.int8, count=count_items,
                           offset=skip_items)
         raw = raw[: (raw.size // 2) * 2]            # drop a dangling byte
-        x = raw[0::2].astype(np.float32) + 1j * raw[1::2].astype(np.float32)
+        # Fill the complex array directly (no float temporaries): peak memory is
+        # the int8 bytes plus the result, not ~3x the result.
+        x = np.empty(raw.size // 2, dtype=np.complex64)
+        x.real = raw[0::2]
+        x.imag = raw[1::2]
+        del raw
         x /= 128.0                                  # int8 full-scale -> ~[-1,1]
     else:  # complex64
         skip_items = int(round(skip_seconds * fs))     # offset is in items here
@@ -70,9 +75,9 @@ def load_iq(path, fmt="int8", fs=4e6, seconds=None, skip_seconds=0.0,
         x = np.fromfile(path, dtype=np.complex64, count=count_items,
                         offset=skip_items * 8)
 
-    x = x.astype(np.complex64)
+    x = x.astype(np.complex64, copy=False)
     if remove_dc and x.size:
-        x = x - x.mean()
+        x -= x.mean()                               # in place: no second copy
     return x
 
 

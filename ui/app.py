@@ -25,6 +25,7 @@ from tabs.acquisition import AcquisitionTab
 from tabs.overview import overview
 from tabs.capture import CapturePanel
 from tabs.signal import SignalTab
+from tabs.tracking import TrackingTab, stop_all_runs
 
 from common.hackrf import stop_all  # noqa: E402  (repo root is on sys.path via state)
 
@@ -53,7 +54,9 @@ def root() -> None:
     signal_tab.capture_panel = CapturePanel(signal_tab, on_recorded=lambda: refresh())
     # Tabs that have real content; the others show placeholders.
     acquisition_tab = AcquisitionTab(on_scanned=lambda: refresh())
-    tab_content = {"signal": signal_tab.build, "acquisition": acquisition_tab.build}
+    tracking_tab = TrackingTab(go_to=lambda key: go_to(key), on_tracked=lambda: refresh())
+    tab_content = {"signal": signal_tab.build, "acquisition": acquisition_tab.build,
+                   "tracking": tracking_tab.build}
 
     def go_to(key: str) -> None:
         tabs.set_value(key)
@@ -72,6 +75,7 @@ def root() -> None:
         overview.refresh()
         signal_tab.request_update()
         acquisition_tab.request_update()
+        tracking_tab.request_update()
 
     def open_source_dialog() -> None:
         source_dialog(on_loaded=refresh).open()
@@ -113,7 +117,8 @@ def root() -> None:
     update_labels()
 
 
-app.on_shutdown(stop_all)   # never leave hackrf_transfer running
+app.on_shutdown(stop_all)        # never leave hackrf_transfer running
+app.on_shutdown(stop_all_runs)   # nor a tracking process
 
 if __name__ in {"__main__", "__mp_main__"}:
     import argparse
@@ -121,5 +126,12 @@ if __name__ in {"__main__", "__mp_main__"}:
     parser.add_argument("--no-browser", action="store_true",
                         help="don't open the default browser on start "
                              "(open http://localhost:8080 yourself)")
+    parser.add_argument("--port", type=int, default=8080,
+                        help="port to serve on (default 8080); use another one to run "
+                             "a second copy")
     args, _ = parser.parse_known_args()   # tolerant: pytest runs this file with its own args
-    ui.run(root, title="Bassanite", port=8080, show=not args.no_browser, reload=False)
+    # reconnect_timeout: how long a page may stay silent before NiceGUI gives up on
+    # it and reloads it. The default 3 s is too short when the computer is busy
+    # (e.g. memory paging during a tracking run), so allow 10 s.
+    ui.run(root, title="Bassanite", port=args.port, show=not args.no_browser, reload=False,
+           reconnect_timeout=10.0)

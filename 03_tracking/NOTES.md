@@ -74,18 +74,24 @@ python 03_tracking/track.py --prn 1 --doppler 3750 --code-phase-chips 431.2
 ```
 
 Key flags: `--from-csv` (stage-02 seeds, default `02_acquisition/scan_results.csv`),
-`--all` (track all 32, not just detected), `--pll-bw`/`--dll-bw`,
-`--seconds`/`--skip-seconds`, `--out-dir`, `--no-plot`.
+`--all` (track all 32, not just detected), `--prns 5,20,22` (only these detected
+PRNs), `--pll-bw`/`--dll-bw`, `--seconds`/`--skip-seconds`, `--out-dir`, `--no-plot`,
+`--progress` (machine-readable `PROGRESS k n prn done_ms total_ms` lines, used by the
+web UI's **Track** tab, which runs this script as a separate process).
 
 The loops and helpers named on this page (`track_prn()`, `calc_loop_coef()`,
 `fine_doppler()`, `bit_sync()`, `estimate_cn0()`) live in
 [`../bassanite/tracking.py`](../bassanite/tracking.py); `track.py` is the command
-line. `track_prn(..., detail=True)` also returns the Early/Late correlators and both
-discriminator outputs per ms. `tracking_summary.csv` gets a
-`tracking_summary.meta.json` recording which recording and settings produced it.
+line. The two discriminators are their own small functions (`costas_error()`,
+`dll_error()`), and `bit_sync_scores()` gives the energy of all 20 bit-edge offsets.
+`track.py` always runs `track_prn(..., detail=True)` and saves the Early/Late
+correlators and both discriminator outputs in each npz (this changes no result).
+`tracking_summary.csv` gets a `tracking_summary.meta.json` recording which recording
+and settings produced it.
 
-> Memory note: tracking needs the whole window in RAM (~1 GB for 30 s of int8 as
-> complex64). Use `--seconds` to cap it.
+> Memory note: tracking needs the whole window in RAM: about 1.2 GB for 30 s of int8
+> at 4 MSPS (the complex64 samples plus the raw bytes while loading). Use `--seconds`
+> to cap it.
 
 ---
 
@@ -106,6 +112,11 @@ discriminator outputs per ms. `tracking_summary.csv` gets a
 | `i_prompt`, `q_prompt` | 1 kHz | prompt correlator (the despread signal) |
 | `doppler_hz` | 1 kHz | tracked carrier Doppler |
 | `code_phase_samp` | 1 kHz | absolute (fractional) code-period start sample → pseudoranges in stage 05 |
+| `i_early`, `q_early`, `i_late`, `q_late` | 1 kHz | Early/Late correlators (±0.5 chip) |
+| `carr_err`, `code_err` | 1 kHz | Costas phase error (cycles) and DLL error (E−L)/(E+L) |
+
+The committed npz files predate the last two rows; re-run `track.py` (or press
+**Track the satellites** in the UI) to get them.
 | `nav_symbols`, `nav_bits` | 50 Hz | soft 20 ms sums and hard 0/1 bits |
 | `cn0_dbhz`, `lock_cos` | 50 Hz | C/N0 (NWPR) and carrier-lock cosine |
 | `prn`, `fs`, `bit_offset`, `ms_per_bit`, … | scalar | metadata |
