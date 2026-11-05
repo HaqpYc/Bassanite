@@ -255,7 +255,9 @@ contract between stages, so the UI and the command-line scripts stay interchange
    bias-tee check.
 3. ✅ **Backend refactor** into importable modules (`bassanite/`), plus the surface
    and correlator outputs, progress callbacks, and provenance files for results.
-4. **Acquisition tab** with "Meet the codes" and the Try-it sliders.
+4. ✅ **Acquisition tab** with "Meet the codes" (shift-register stepper, auto/cross
+   correlation), the PRN bar chart, the correlation surface and slices, the Try-it
+   sliders (measured against sinc²) and the persistence check with its drift test.
 5. **Tracking tab** with the time scrubber.
 6. **Stages 04 and 05:** each backend stage ships with its tab, following the
    five-block layout above.

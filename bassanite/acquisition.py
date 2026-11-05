@@ -14,18 +14,24 @@ The detection metric is peak/mean of the accumulated surface (pure noise gives
 ~3 for 10 ms at 4 MSPS; the default threshold is 5). See
 02_acquisition/NOTES.md for the full explanation and the verification method.
 """
+import csv
 import os
 import sys
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common.ca_code import CODE_LENGTH, upsample_code  # noqa: E402
+from common.ca_code import CHIP_RATE, CODE_LENGTH, upsample_code  # noqa: E402
 
 DEFAULT_DOP_RANGE_HZ = 10000.0
 DEFAULT_DOP_STEP_HZ = 250.0
 DEFAULT_MS = 10
 DEFAULT_THRESHOLD = 5.0
+L1_HZ = 1575.42e6
+
+# Columns of scan_results.csv, the file stage 03 reads its seeds from.
+CSV_FIELDS = ("prn", "doppler_hz", "code_phase_samp", "code_phase_chips",
+              "peak_over_mean", "detected")
 
 
 def correlation_surface(x, fs, prn, dopplers, nms):
@@ -101,3 +107,45 @@ def scan(x, fs, dop_min, dop_max, dop_step, nms, threshold, prns=range(1, 33),
 def seconds_needed(nms):
     """How many seconds of signal a scan integrating `nms` ms reads (+5 ms margin)."""
     return (nms + 5) / 1000.0
+
+
+def code_drift_chips_per_s(doppler_hz):
+    """How fast the code phase should slide, given the carrier Doppler.
+
+    Code and carrier are stretched by the same factor (1 + v/c), so a carrier
+    offset f_D comes with a chip-rate offset of 1.023 MHz * f_D / f_L1. A
+    positive Doppler (satellite approaching) means the code arrives earlier and
+    earlier: its phase in our 1 ms window decreases.
+    """
+    return -CHIP_RATE * np.asarray(doppler_hz) / L1_HZ
+
+
+def cn0_from_peak(peak_over_mean, coherent_s=1e-3):
+    """Rough C/N0 in dB-Hz from an acquisition peak.
+
+    A coherent sum over T seconds gives the aligned cell a signal-to-noise ratio of
+    C/N0 * T, and the surface average is almost all noise, so
+    peak/mean - 1 ~ C/N0 * T. Only meaningful for a detected satellite; expect
+    +/-2 dB because the search grid rarely hits the peak exactly.
+    """
+    return 10 * np.log10(max(peak_over_mean - 1.0, 1e-12) / coherent_s)
+
+
+def write_results(results, path):
+    """Write scan results (as returned by `scan`) to a CSV file."""
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(CSV_FIELDS))
+        w.writeheader()
+        w.writerows({k: r[k] for k in CSV_FIELDS} for r in results)
+
+
+def read_results(path):
+    """Read a scan_results.csv back into the dicts `scan` returns."""
+    with open(path, newline="") as f:
+        return [{"prn": int(r["prn"]),
+                 "doppler_hz": float(r["doppler_hz"]),
+                 "code_phase_samp": int(r["code_phase_samp"]),
+                 "code_phase_chips": float(r["code_phase_chips"]),
+                 "peak_over_mean": float(r["peak_over_mean"]),
+                 "detected": r["detected"] == "True"}
+                for r in csv.DictReader(f)]

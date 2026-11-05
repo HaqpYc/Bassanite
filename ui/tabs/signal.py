@@ -13,28 +13,11 @@ from state import GPS_L1_HZ, IQSource, state  # first: puts the repo root on sys
 from common.signal_view import (adc_stats, burst_stats, code_histogram, psd,  # noqa: E402,I001
                                 raw_samples, waterfall)
 from components import explain_panel  # noqa: E402
+from plots import PLOT_CONFIG, empty_figure as _empty_figure, layout as _layout  # noqa: E402
 
 CA_HALF_WIDTH_HZ = 1.023e6      # GPS C/A main lobe: +/- one chip rate around L1
 TIME_SAMPLES = 200              # samples shown in the time plot
 WATERFALL_NFFT, WATERFALL_ROWS = 512, 150
-
-PLOT_CONFIG = {"displaylogo": False, "responsive": True,
-               "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
-
-
-def _layout(**kwargs) -> dict:
-    layout = {"margin": {"l": 60, "r": 20, "t": 10, "b": 45}, "height": 300,
-              "template": "plotly_white",
-              "legend": {"orientation": "h", "y": 1.02, "yanchor": "bottom", "x": 0}}
-    layout.update(kwargs)
-    return layout
-
-
-def _empty_figure(message: str = "") -> dict:
-    return {"data": [], "config": PLOT_CONFIG, "layout": _layout(
-        xaxis={"visible": False}, yaxis={"visible": False},
-        annotations=[{"text": message, "showarrow": False, "font": {"size": 14}}]
-        if message else [])}
 
 
 @dataclass(frozen=True)
@@ -287,10 +270,6 @@ class SignalTab:
             ui.switch("Remove DC offset", value=self.settings.remove_dc,
                       on_change=lambda e: self._set(remove_dc=e.value))
             ui.label("The waterfall always covers the whole recording.") \
-                .classes("text-xs text-grey-7")
-            ui.separator()
-            ui.label("Live capture").classes("text-subtitle1 font-bold")
-            ui.label("Gains, sample rate and bias-tee controls arrive with live capture.") \
                 .classes("text-xs text-grey-7")
 
     def _build_status(self) -> None:

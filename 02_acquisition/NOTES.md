@@ -74,9 +74,11 @@ recording and settings produced it), and `scan_plot.png` (peak/mean per PRN with
 threshold line).
 
 The search itself is in [`../bassanite/acquisition.py`](../bassanite/acquisition.py)
-(`correlation_surface()`, `acquire_prn()`, `scan()`); `scan_prns.py` is its command
-line. `acquire_prn(..., return_surface=True)` also returns the full
-Doppler × code-phase correlation surface.
+(`correlation_surface()`, `acquire_prn()`, `scan()`, `write_results()`/`read_results()`);
+`scan_prns.py` is its command line. `acquire_prn(..., return_surface=True)` also returns
+the full Doppler × code-phase correlation surface. The web UI's **Find satellites** tab
+runs the same scan (and writes the same two files), and adds the persistence check
+below as a button.
 
 ---
 
@@ -121,6 +123,23 @@ samples; PRN 5 stays at 0 Hz, 3632 → 3634 → 3637). Noise PRNs jump to random
 Doppler/code phase each window. Six independent PRNs each holding a *different*
 steady Doppler with a *different* smooth drift = six satellites at six sky
 positions — this cannot be an artifact.
+
+### The drift must match the Doppler
+Code and carrier are stretched by the same factor, so a satellite's code phase must
+slide at `−1.023 MHz · f_D / f_L1` chips/s (`code_drift_chips_per_s()`). The UI's
+persistence check rescans at 0, 7.5, 15, 22.5 and 30 s, refines each Doppler to 10 Hz,
+and fits the slide. On `capture.bin` all **8** detected PRNs agree with the prediction
+within 0.035 chips/s (e.g. PRN 20: measured −1.597, predicted −1.562 chips/s; PRN 15:
+−2.552 vs −2.553). That includes **PRN 7** (−2082 Hz, +1.354 vs +1.352): it is a real
+satellite, just too weak for stage 03 to lock. The two strongest undetected PRNs (10, 3)
+jump by thousands of Hz and hundreds of chips between windows.
+
+### peak/mean is a rough C/N0
+A coherent 1 ms sum gives the aligned cell an SNR of `C/N0 · 1 ms`, so
+`C/N0 ≈ 10·log10((peak/mean − 1) / 1 ms)` (`cn0_from_peak()`). On `capture.bin` this
+lands within 1.7 dB of what tracking measures (PRN 20: 43.5 vs 43.2 dB-Hz). The noise
+floor of ~3.2 is what a simulation of pure noise gives for 10 ms over 81 × 4000 cells
+(13 for 1 ms, 2.4 for 20 ms).
 
 **Next stage:** [`../03_tracking/`](../03_tracking/) seeds its loops from
 `scan_results.csv` (this stage's output) and locks 7 of these PRNs for the full 30 s

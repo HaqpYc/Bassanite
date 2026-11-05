@@ -72,18 +72,18 @@ def test_results_for_another_recording_are_flagged(tmp_path, monkeypatch):
     results.write_text("prn\n")
 
     # No provenance file: results are assumed to be for capture.bin.
-    assert stages._results_from_other_recording(stage, IQSource(rec))
-    assert not stages._results_from_other_recording(stage, IQSource(DEFAULT_RECORDING))
+    assert stages.results_from_other_recording(stage, IQSource(rec))
+    assert not stages.results_from_other_recording(stage, IQSource(DEFAULT_RECORDING))
     assert stages.results_source_name(stage) == DEFAULT_RECORDING.name
 
     # With provenance: the named recording, and only it, matches.
     write_meta(results, "acquisition", rec, "int8", 4e6, {})
-    assert not stages._results_from_other_recording(stage, IQSource(rec))
-    assert stages._results_from_other_recording(stage, IQSource(other))
+    assert not stages.results_from_other_recording(stage, IQSource(rec))
+    assert stages.results_from_other_recording(stage, IQSource(other))
     assert stages.results_source_name(stage) == "new.bin"
 
-    assert not stages._results_from_other_recording(stage, None)
-    assert not stages._results_from_other_recording(stages.STAGE_BY_KEY["signal"],
+    assert not stages.results_from_other_recording(stage, None)
+    assert not stages.results_from_other_recording(stages.STAGE_BY_KEY["signal"],
                                                     IQSource(rec))
 
 

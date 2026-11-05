@@ -115,7 +115,7 @@ def results_source_name(stage: Stage) -> str:
     return Path(meta["source"]["path"]).name if meta else DEFAULT_RECORDING.name
 
 
-def _results_from_other_recording(stage: Stage, source: IQSource | None) -> bool:
+def results_from_other_recording(stage: Stage, source: IQSource | None) -> bool:
     """True when the stage's result files don't belong to the loaded recording.
 
     Results written by the current stage scripts carry a provenance file
@@ -126,7 +126,12 @@ def _results_from_other_recording(stage: Stage, source: IQSource | None) -> bool
     """
     if source is None or not stage.output_files:
         return False
-    meta = read_meta(REPO_ROOT / stage.output_files[0])
+    return result_is_for_other_recording(REPO_ROOT / stage.output_files[0], source)
+
+
+def result_is_for_other_recording(result_path: Path, source: IQSource) -> bool:
+    """The same check for one result file (see results_from_other_recording)."""
+    meta = read_meta(result_path)
     if meta is not None:
         return not same_recording(meta, source.path)
     return Path(source.path).resolve() != DEFAULT_RECORDING.resolve()
@@ -143,7 +148,7 @@ def stage_status(stage: Stage, source: IQSource | None) -> StageStatus:
         status = _tracking_status()
     else:
         raise ValueError(f"no status rule for stage {stage.key!r}")
-    if status.state == "done" and _results_from_other_recording(stage, source):
+    if status.state == "done" and results_from_other_recording(stage, source):
         return StageStatus("attention",
                            f"Results on disk are for {results_source_name(stage)}, not "
                            f"{source.path.name}: run this step on it",

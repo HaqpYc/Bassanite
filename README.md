@@ -64,7 +64,9 @@ analysis.
 
 A local web app walks through the pipeline one tab per stage, with plain-language
 explanations and toggleable math. See [`docs/UI_PLAN.md`](docs/UI_PLAN.md) for the
-full plan; for now it is the shell (navigation, stage status, explanations).
+full plan. Built so far: the Overview, the **Signal** tab (spectrum, waterfall, ADC
+levels, live HackRF capture) and the **Find satellites** tab (Gold codes step by step,
+the 32-PRN scan, the correlation surface, Try-it sliders, the persistence check).
 
 ```bash
 pip install -r requirements.txt   # ideally in a virtual environment

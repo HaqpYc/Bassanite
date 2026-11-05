@@ -60,6 +60,8 @@ async def test_panels_open_individually_and_follow_the_switch(user: User) -> Non
 async def test_mode_toggle_drives_global_state(user: User) -> None:
     state.mode = "beginner"
     await user.open("/")
-    user.find(kind=ui.toggle).elements.pop().set_value("expert")
+    mode_toggle = next(t for t in user.find(kind=ui.toggle).elements
+                       if "expert" in t.options)
+    mode_toggle.set_value("expert")
     assert state.expert
     state.mode = "beginner"

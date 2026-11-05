@@ -21,6 +21,7 @@ from components import set_all_panels, stage_page
 from source_dialog import source_dialog
 from stages import STAGES, stage_status
 from state import state
+from tabs.acquisition import AcquisitionTab
 from tabs.overview import overview
 from tabs.capture import CapturePanel
 from tabs.signal import SignalTab
@@ -51,7 +52,8 @@ def root() -> None:
     signal_tab = SignalTab()
     signal_tab.capture_panel = CapturePanel(signal_tab, on_recorded=lambda: refresh())
     # Tabs that have real content; the others show placeholders.
-    tab_content = {"signal": signal_tab.build}
+    acquisition_tab = AcquisitionTab(on_scanned=lambda: refresh())
+    tab_content = {"signal": signal_tab.build, "acquisition": acquisition_tab.build}
 
     def go_to(key: str) -> None:
         tabs.set_value(key)
@@ -69,6 +71,7 @@ def root() -> None:
         update_labels()
         overview.refresh()
         signal_tab.request_update()
+        acquisition_tab.request_update()
 
     def open_source_dialog() -> None:
         source_dialog(on_loaded=refresh).open()

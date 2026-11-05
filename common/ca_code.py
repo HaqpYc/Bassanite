@@ -51,6 +51,39 @@ CODE_LENGTH = 1023          # chips per C/A code period
 CHIP_RATE = 1.023e6         # chips per second
 CODE_PERIOD = 1e-3          # seconds (1 ms)
 
+# Feedback taps (1-indexed stages) of the two 10-stage shift registers.
+# G1 = 1 + x^3 + x^10, G2 = 1 + x^2 + x^3 + x^6 + x^8 + x^9 + x^10.
+G1_FEEDBACK = (3, 10)
+G2_FEEDBACK = (2, 3, 6, 8, 9, 10)
+REGISTER_STAGES = 10
+
+
+def register_states(prn):
+    """Run the two shift registers for one full code period.
+
+    Returns (g1, g2, chips): g1 and g2 are (1023, 10) arrays holding each
+    register's contents (stage 1 first) just before chip i is produced, and
+    chips are the 1023 output bits (0/1). Both registers start as all ones.
+    """
+    if prn not in G2_TAPS:
+        raise ValueError(f"PRN must be 1..32, got {prn}")
+    g1 = np.ones(REGISTER_STAGES, dtype=int)
+    g2 = np.ones(REGISTER_STAGES, dtype=int)
+    s1, s2 = G2_TAPS[prn]
+    g1_hist = np.empty((CODE_LENGTH, REGISTER_STAGES), dtype=int)
+    g2_hist = np.empty((CODE_LENGTH, REGISTER_STAGES), dtype=int)
+    out = np.empty(CODE_LENGTH, dtype=int)
+    for i in range(CODE_LENGTH):
+        g1_hist[i], g2_hist[i] = g1, g2
+        # Output chip = G1 last stage XOR (the two selected G2 stages).
+        out[i] = g1[9] ^ (g2[s1 - 1] ^ g2[s2 - 1])
+        # Maximal-length feedback for each register: XOR of its tap stages.
+        fb1 = np.bitwise_xor.reduce(g1[[t - 1 for t in G1_FEEDBACK]])
+        fb2 = np.bitwise_xor.reduce(g2[[t - 1 for t in G2_FEEDBACK]])
+        g1 = np.roll(g1, 1); g1[0] = fb1
+        g2 = np.roll(g2, 1); g2[0] = fb2
+    return g1_hist, g2_hist, out
+
 
 def ca_code(prn, as_bits=False):
     """Return the length-1023 C/A code for `prn`.
@@ -58,20 +91,7 @@ def ca_code(prn, as_bits=False):
     By default returns it as +/-1 floats (ready for correlation). With
     as_bits=True it returns the raw 0/1 chips instead.
     """
-    if prn not in G2_TAPS:
-        raise ValueError(f"PRN must be 1..32, got {prn}")
-    g1 = np.ones(10, dtype=int)
-    g2 = np.ones(10, dtype=int)
-    s1, s2 = G2_TAPS[prn]
-    out = np.empty(CODE_LENGTH, dtype=int)
-    for i in range(CODE_LENGTH):
-        # Output chip = G1 last stage XOR (the two selected G2 stages).
-        out[i] = g1[9] ^ (g2[s1 - 1] ^ g2[s2 - 1])
-        # Maximal-length feedback for each register.
-        fb1 = g1[2] ^ g1[9]
-        fb2 = g2[1] ^ g2[2] ^ g2[5] ^ g2[7] ^ g2[8] ^ g2[9]
-        g1 = np.roll(g1, 1); g1[0] = fb1
-        g2 = np.roll(g2, 1); g2[0] = fb2
+    out = register_states(prn)[2]
     if as_bits:
         return out
     return (1 - 2 * out).astype(np.float64)   # 0 -> +1, 1 -> -1

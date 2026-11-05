@@ -3,8 +3,11 @@ from pathlib import Path
 
 import pytest
 
-# Make the ui/ modules (state, stages, ...) importable from the tests.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Make the ui/ modules (state, stages, ...) and the repo-root packages
+# (bassanite, common) importable from the tests, whichever test file runs first.
+_UI = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_UI))
+sys.path.insert(1, str(_UI.parent))
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
 

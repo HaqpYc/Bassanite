@@ -71,4 +71,6 @@ async def test_signal_tab_shows_plots_and_panels(user: User, recording) -> None:
                  "I and Q against time", "IQ plane", "ADC levels used",
                  "Spectrum: where the energy is", "ADC levels: is the gain right?"]:
         await user.should_see(text)
-    assert len(user.find(ui.plotly).elements) == 5
+    panel = next(p for p in user.find(kind=ui.tab_panel).elements
+                 if p.props["name"] == "signal")
+    assert sum(isinstance(e, ui.plotly) for e in panel.descendants()) == 5

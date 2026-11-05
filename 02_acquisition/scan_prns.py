@@ -44,7 +44,6 @@ Example:
   python scan_prns.py --iq recordings/capture.bin --format int8 --fs 4e6
 """
 import argparse
-import csv
 import os
 import sys
 
@@ -58,7 +57,7 @@ if _ROOT not in sys.path:
 
 from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
                                    DEFAULT_MS, DEFAULT_THRESHOLD, scan,
-                                   seconds_needed)
+                                   seconds_needed, write_results)
 from bassanite.provenance import write_meta                    # noqa: E402
 from common.iq_loader import load_iq                           # noqa: E402
 
@@ -80,10 +79,7 @@ def print_table(results, threshold):
 
 
 def write_csv(results, path):
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(results[0].keys()))
-        w.writeheader()
-        w.writerows(results)
+    write_results(results, path)
     print(f"wrote {path}")
 
 

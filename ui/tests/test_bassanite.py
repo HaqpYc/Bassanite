@@ -6,28 +6,7 @@ import numpy as np
 import pytest
 
 from bassanite import acquisition, provenance, tracking
-from common.ca_code import CHIP_RATE, CODE_LENGTH, ca_code
-
-FS = 4e6
-PRN, CODE_PHASE_SAMP, DOPPLER = 7, 1234, 1500.0
-
-
-def synthetic_gps(seconds, cn0_dbhz=48.0, seed=0):
-    """One satellite: code delayed by CODE_PHASE_SAMP samples, carrier at DOPPLER,
-    random data bits every 20 ms, complex white noise of unit power. Like a real
-    signal, the code is stretched by the same Doppler as the carrier
-    (chip rate x (1 + f_D / f_L1))."""
-    rng = np.random.default_rng(seed)
-    n = int(FS * seconds)
-    t = np.arange(n) / FS
-    chip_rate = CHIP_RATE * (1 + DOPPLER / tracking.L1_HZ)
-    chips = np.floor((np.arange(n) - CODE_PHASE_SAMP) * chip_rate / FS).astype(int)
-    code = ca_code(PRN)[chips % CODE_LENGTH]
-    bits = rng.choice([-1.0, 1.0], size=int(seconds * 50) + 2)
-    data = bits[((np.arange(n) - CODE_PHASE_SAMP) // int(FS * 0.02)).clip(0)]
-    amp = np.sqrt(10 ** ((cn0_dbhz - 10 * np.log10(FS)) / 10))   # per-sample SNR
-    noise = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
-    return amp * code * data * np.exp(2j * np.pi * DOPPLER * t) + noise
+from synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps
 
 
 @pytest.fixture(scope="module")

@@ -17,6 +17,7 @@ from common.hackrf import (DEVICE_LOCK, LNA_STEPS, SAMPLE_RATES, Capture,  # noq
                            CaptureSettings, DeviceInfo, bias_tee_check, capture_blocking,
                            device_info, recording_path, write_sidecar)
 from components import explain_panel  # noqa: E402
+from plots import figure  # noqa: E402
 from tabs.signal import burst_message  # noqa: E402
 
 RECORDINGS_DIR = REPO_ROOT / "recordings"
@@ -252,11 +253,7 @@ class CapturePanel:
                 data.append({"type": "scatter", "mode": "lines", "name": label,
                              "x": ((self.settings.center_hz + freqs) / 1e6).tolist(),
                              "y": np.round(power, 2).tolist(), "line": {"width": 1.2}})
-            ui.plotly({"data": data, "config": {"displaylogo": False, "responsive": True},
-                       "layout": {"height": 240, "template": "plotly_white",
-                                  "margin": {"l": 60, "r": 20, "t": 10, "b": 40},
-                                  "legend": {"orientation": "h", "y": 1.02,
-                                             "yanchor": "bottom", "x": 0},
-                                  "xaxis": {"title": "Frequency (MHz)"},
-                                  "yaxis": {"title": "Power per bin (dBFS)"}}}) \
+            ui.plotly(figure(data, height=240, margin={"l": 60, "r": 20, "t": 10, "b": 40},
+                             xaxis={"title": "Frequency (MHz)"},
+                             yaxis={"title": "Power per bin (dBFS)"})) \
                 .classes("w-full")
