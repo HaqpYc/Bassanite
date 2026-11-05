@@ -32,7 +32,7 @@ def _pipeline(go_to: Callable[[str], None]) -> None:
                 ui.label(stage.tagline).classes("text-xs text-grey-8")
                 ui.label(f"{status.icon} {status.summary}").classes("text-sm")
                 if status.detail:
-                    ui.label(status.detail).classes("text-xs text-grey-6 font-mono")
+                    ui.label(status.detail).classes("text-xs text-grey-6 font-mono break-all")
 
 
 def _input_card(open_source_dialog: Callable[[], None]) -> None:

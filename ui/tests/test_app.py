@@ -1,7 +1,10 @@
 """Build the whole page with NiceGUI's simulated user (no browser needed)."""
+import asyncio
+
 from nicegui import ui
 from nicegui.testing import User
 
+from components import EXPLAIN_MARKER
 from state import state
 
 
@@ -35,6 +38,23 @@ async def test_math_switch_drives_global_state(user: User) -> None:
     assert state.show_math is True
     switch.click()
     assert state.show_math is False
+
+
+async def test_panels_open_individually_and_follow_the_switch(user: User) -> None:
+    """Regression: a binding forced every panel shut while the switch was off."""
+    state.show_math = False
+    await user.open("/")
+    panels = list(user.find(kind=ui.expansion, marker=EXPLAIN_MARKER).elements)
+    assert len(panels) >= 10 and not any(p.value for p in panels)
+
+    panels[0].set_value(True)              # the user opens one panel
+    await asyncio.sleep(0.5)               # several binding refresh cycles
+    assert panels[0].value is True and not panels[1].value
+
+    user.find(kind=ui.switch, content="Show the math").click()
+    assert all(p.value for p in panels)
+    user.find(kind=ui.switch, content="Show the math").click()
+    assert not any(p.value for p in panels)
 
 
 async def test_mode_toggle_drives_global_state(user: User) -> None:

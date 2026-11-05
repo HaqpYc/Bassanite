@@ -16,11 +16,12 @@ from __future__ import annotations
 
 from nicegui import ui
 
-from components import stage_page
+from components import set_all_panels, stage_page
 from source_dialog import source_dialog
 from stages import STAGES, stage_status
 from state import state
 from tabs.overview import overview
+from tabs.signal import SignalTab
 
 HELP = """
 **How to use Bassanite**
@@ -43,6 +44,9 @@ def root() -> None:
     """)
 
     tab_refs: dict[str, ui.tab] = {}
+    signal_tab = SignalTab()
+    # Tabs that have real content; the others show placeholders.
+    tab_content = {"signal": signal_tab.build}
 
     def go_to(key: str) -> None:
         tabs.set_value(key)
@@ -59,6 +63,7 @@ def root() -> None:
         """Update everything that depends on the source or on stage results."""
         update_labels()
         overview.refresh()
+        signal_tab.request_update()
 
     def open_source_dialog() -> None:
         source_dialog(on_loaded=refresh).open()
@@ -78,6 +83,7 @@ def root() -> None:
                 .props("dense no-caps unelevated rounded color=blue-grey-7 "
                        "toggle-color=amber-7 text-color=white")
             ui.switch("Show the math").bind_value(state, "show_math") \
+                .on_value_change(lambda e: set_all_panels(e.value)) \
                 .props("dark color=amber-7")
             ui.button(icon="help_outline", on_click=help_dialog.open) \
                 .props("flat round dense color=white").tooltip("How to use Bassanite")
@@ -94,7 +100,7 @@ def root() -> None:
             overview(go_to, open_source_dialog, refresh)
         for stage in STAGES:
             with ui.tab_panel(stage.key):
-                stage_page(stage, go_to)
+                stage_page(stage, go_to, content=tab_content.get(stage.key))
 
     update_labels()
 

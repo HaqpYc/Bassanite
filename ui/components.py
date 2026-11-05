@@ -2,9 +2,10 @@
 and the five-block stage layout (story, controls, visualisations, outputs, nav)."""
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
-from nicegui import ui
+from nicegui import ElementFilter, ui
 
 from explain import function_source, load_panel, load_story, panel_names
 from stages import STAGES, Stage
@@ -18,7 +19,22 @@ MD_EXTRAS = ["latex", "fenced-code-blocks", "tables"]
 _BUILD_STEP = {"signal": 2, "acquisition": 4, "tracking": 5, "decode": 6, "position": 6}
 
 
+EXPLAIN_MARKER = "explain-panel"
+
+
+def set_all_panels(open_: bool) -> None:
+    """Open or close every explanation panel on the current page."""
+    for expansion in ElementFilter(kind=ui.expansion, marker=EXPLAIN_MARKER):
+        expansion.set_value(open_)
+
+
+# markdown2's latex extra turns a line break into a real break when the next line
+# starts with inline math ($x$). Join such lines so paragraphs flow normally.
+_BREAK_BEFORE_INLINE_MATH = re.compile(r"(?<=\S)\n(?=\$(?!\$))")
+
+
 def md(text: str) -> ui.markdown:
+    text = _BREAK_BEFORE_INLINE_MATH.sub(" ", text)
     # sanitize=False: the text comes from the repo's own ui/explain/ files.
     return ui.markdown(text, extras=MD_EXTRAS, sanitize=False).classes("w-full bassanite-md")
 
@@ -26,13 +42,14 @@ def md(text: str) -> ui.markdown:
 def explain_panel(stage_key: str, name: str) -> None:
     """One "How is this computed?" panel with Intuition / Math / Code tabs.
 
-    It opens and closes with the global "Show the math" switch, and can also be
-    opened on its own.
+    Flipping the global "Show the math" switch opens or closes every panel (see
+    set_all_panels); each panel can also be opened on its own. (A binding would
+    not do: it forces the panel back to the switch's value every 0.1 s.)
     """
     panel = load_panel(stage_key, name)
-    with ui.expansion(panel.title, caption="How is this computed?", icon="functions") \
-            .classes("w-full border rounded-lg") as expansion:
-        expansion.bind_value_from(state, "show_math")
+    with ui.expansion(panel.title, caption="How is this computed?", icon="functions",
+                      value=state.show_math) \
+            .classes("w-full border rounded-lg").mark(EXPLAIN_MARKER):
         with ui.tabs().props("dense align=left no-caps") as tabs:
             ui.tab("intuition", "Intuition", icon="lightbulb")
             ui.tab("math", "Math", icon="functions")
@@ -98,8 +115,32 @@ def _nav(stage: Stage, go_to: Callable[[str], None]) -> None:
                 .props("no-caps")
 
 
-def stage_page(stage: Stage, go_to: Callable[[str], None]) -> None:
-    """The five-block layout every stage tab shares."""
+def _placeholder(stage: Stage) -> None:
+    step = _BUILD_STEP[stage.key]
+    with ui.row().classes("w-full items-stretch gap-4"):
+        with ui.card().classes("w-full md:w-72").props("flat bordered") \
+                .bind_visibility_from(state, "mode", value="expert"):
+            ui.label("Controls").classes("text-subtitle1 font-bold")
+            ui.label(f"The settings for this step arrive with its tab "
+                     f"(build step {step} of docs/UI_PLAN.md).").classes("text-grey-7")
+        with ui.card().classes("flex-1 min-w-[16rem] min-h-[12rem]").props("flat bordered"):
+            ui.label("Visualisations").classes("text-subtitle1 font-bold")
+            ui.label(f"Plots for this step arrive in build step {step} of "
+                     f"docs/UI_PLAN.md.").classes("text-grey-7")
+
+
+# The stage-level panel ("how.md") goes at the top of the tab. Every other panel of
+# a stage belongs to one visualisation and is placed by that tab's own code.
+STAGE_PANEL = "how"
+
+
+def stage_page(stage: Stage, go_to: Callable[[str], None],
+               content: Callable[[], None] | None = None) -> None:
+    """The five-block layout every stage tab shares.
+
+    `content` builds the tab's controls and visualisations; without it, the tab
+    shows placeholders.
+    """
     with ui.column().classes("w-full gap-4"):
         ui.label(f"Step {stage.number} · {stage.title}").classes("text-h5")
         story(stage.key)
@@ -108,20 +149,13 @@ def stage_page(stage: Stage, go_to: Callable[[str], None]) -> None:
             ui.label("🔒 This stage is not built yet. The explanation below already "
                      "describes how it will work.").classes("text-grey-8")
 
-        step = _BUILD_STEP[stage.key]
-        with ui.row().classes("w-full items-stretch gap-4"):
-            with ui.card().classes("w-full md:w-72").props("flat bordered") \
-                    .bind_visibility_from(state, "mode", value="expert"):
-                ui.label("Controls").classes("text-subtitle1 font-bold")
-                ui.label(f"The settings for this step arrive with its tab "
-                         f"(build step {step} of docs/UI_PLAN.md).").classes("text-grey-7")
-            with ui.card().classes("flex-1 min-w-[16rem] min-h-[12rem]").props("flat bordered"):
-                ui.label("Visualisations").classes("text-subtitle1 font-bold")
-                ui.label(f"Plots for this step arrive in build step {step} of "
-                         f"docs/UI_PLAN.md.").classes("text-grey-7")
+        if STAGE_PANEL in panel_names(stage.key):
+            explain_panel(stage.key, STAGE_PANEL)
 
-        for name in panel_names(stage.key):
-            explain_panel(stage.key, name)
+        if content is None:
+            _placeholder(stage)
+        else:
+            content()
 
         _outputs(stage)
         _nav(stage, go_to)
