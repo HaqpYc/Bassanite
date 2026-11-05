@@ -117,6 +117,31 @@ def adc_stats(i, q, fmt="int8"):
     return stats
 
 
+def block_power_db(x, fs, block_s=1e-3):
+    """Mean power of each `block_s`-long block of `x`, in dBFS."""
+    n = max(int(round(fs * block_s)), 1)
+    nblocks = len(x) // n
+    if nblocks == 0:
+        return np.array([])
+    p = np.mean(np.abs(x[: nblocks * n].reshape(nblocks, n)) ** 2, axis=1)
+    return 10.0 * np.log10(p + 1e-20)
+
+
+def burst_stats(x, fs, block_s=1e-3, threshold_db=2.0):
+    """How bursty the level is: intermittent interference shows up as short
+    blocks well above the usual (median) level, while steady noise doesn't.
+
+    Returns {"burst_fraction": share of blocks more than `threshold_db` above
+    the median, "burst_max_db": strongest block above the median}.
+    """
+    p = block_power_db(x, fs, block_s)
+    if p.size < 2:
+        return {"burst_fraction": 0.0, "burst_max_db": 0.0}
+    base = np.median(p)
+    return {"burst_fraction": float(np.mean(p > base + threshold_db)),
+            "burst_max_db": float(p.max() - base)}
+
+
 def code_histogram(values):
     """Count how often each int8 ADC code (-128..127) occurs.
 

@@ -14,14 +14,17 @@ Editing:
 """
 from __future__ import annotations
 
-from nicegui import ui
+from nicegui import app, ui
 
 from components import set_all_panels, stage_page
 from source_dialog import source_dialog
 from stages import STAGES, stage_status
 from state import state
 from tabs.overview import overview
+from tabs.capture import CapturePanel
 from tabs.signal import SignalTab
+
+from common.hackrf import stop_all  # noqa: E402  (repo root is on sys.path via state)
 
 HELP = """
 **How to use Bassanite**
@@ -45,6 +48,7 @@ def root() -> None:
 
     tab_refs: dict[str, ui.tab] = {}
     signal_tab = SignalTab()
+    signal_tab.capture_panel = CapturePanel(signal_tab, on_recorded=lambda: refresh())
     # Tabs that have real content; the others show placeholders.
     tab_content = {"signal": signal_tab.build}
 
@@ -104,6 +108,8 @@ def root() -> None:
 
     update_labels()
 
+
+app.on_shutdown(stop_all)   # never leave hackrf_transfer running
 
 if __name__ in {"__main__", "__mp_main__"}:
     ui.run(root, title="Bassanite", port=8080, show=True, reload=False)

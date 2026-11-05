@@ -9,7 +9,7 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from state import REPO_ROOT, IQSource
+from state import DEFAULT_RECORDING, REPO_ROOT, IQSource
 
 # A tracked satellite counts as locked when |Q_P|/|I_P| stays well below this
 # (see 03_tracking/NOTES.md, "C/N0 and the lock indicator").
@@ -109,16 +109,37 @@ def _tracking_status() -> StageStatus:
     return StageStatus("done", summary, f"from {path}")
 
 
+def _results_from_other_recording(stage: Stage, source: IQSource | None) -> bool:
+    """True when the stage's result files can't belong to the loaded recording.
+
+    The result files don't record which recording they came from, and file dates
+    are unreliable (copying a file changes them). The stage scripts read
+    recordings/capture.bin by default, so results on disk are taken to come from
+    it; any other loaded recording is flagged. (The planned run history will
+    record the real provenance.)
+    """
+    if source is None or not stage.output_files:
+        return False
+    return Path(source.path).resolve() != DEFAULT_RECORDING.resolve()
+
+
 def stage_status(stage: Stage, source: IQSource | None) -> StageStatus:
     if stage.key == "signal":
         return _signal_status(source)
     if not stage.built:
         return StageStatus("locked", "Not built yet")
     if stage.key == "acquisition":
-        return _acquisition_status()
-    if stage.key == "tracking":
-        return _tracking_status()
-    raise ValueError(f"no status rule for stage {stage.key!r}")
+        status = _acquisition_status()
+    elif stage.key == "tracking":
+        status = _tracking_status()
+    else:
+        raise ValueError(f"no status rule for stage {stage.key!r}")
+    if status.state == "done" and _results_from_other_recording(stage, source):
+        return StageStatus("attention",
+                           f"Results on disk are for {DEFAULT_RECORDING.name}, not "
+                           f"{source.path.name}: run this step on it",
+                           status.detail)
+    return status
 
 
 def furthest_done(source: IQSource | None) -> Stage | None:

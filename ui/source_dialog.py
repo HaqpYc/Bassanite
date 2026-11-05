@@ -5,7 +5,9 @@ from collections.abc import Callable
 
 from nicegui import ui
 
-from state import GPS_L1_HZ, IQSource, default_source, guess_format, state
+from state import GPS_L1_HZ, IQSource, default_source, guess_format, state  # sets sys.path
+
+from common.hackrf import read_sidecar  # noqa: E402
 
 FORMATS = {
     "int8": "int8: HackRF (hackrf_transfer)",
@@ -59,7 +61,13 @@ def source_dialog(on_loaded: Callable[[], None]) -> ui.dialog:
         def on_path_change() -> None:
             text = _clean_path(path.value or "")
             if text:
-                fmt.set_value(guess_format(text))   # triggers refresh() via fmt
+                meta = read_sidecar(text)      # settings saved by the app's recorder
+                if meta:
+                    fmt.set_value(meta.get("format", "int8"))
+                    fs.set_value(meta["fs"] / 1e6)
+                    fc.set_value(meta["center_hz"] / 1e6)
+                else:
+                    fmt.set_value(guess_format(text))
             refresh()
 
         def load(src: IQSource | None) -> None:

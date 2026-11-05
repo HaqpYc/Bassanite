@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -9,7 +10,8 @@ from nicegui import run, ui
 
 from state import GPS_L1_HZ, IQSource, state  # first: puts the repo root on sys.path
 
-from common.signal_view import adc_stats, code_histogram, psd, raw_samples, waterfall  # noqa: E402,I001
+from common.signal_view import (adc_stats, burst_stats, code_histogram, psd,  # noqa: E402,I001
+                                raw_samples, waterfall)
 from components import explain_panel  # noqa: E402
 
 CA_HALF_WIDTH_HZ = 1.023e6      # GPS C/A main lobe: +/- one chip rate around L1
@@ -57,6 +59,7 @@ def analyse(src: IQSource, s: Settings) -> dict:
     x = (ci + 1j * cq) / (128.0 if int8 else 1.0)
     freqs, power = psd(x, src.fs, min(s.nfft, len(x)))
 
+    stats.update(burst_stats(x, src.fs))
     result = {"start": start, "stats": stats, "int8": int8,
               "psd": (freqs, power),
               "time": (ci[:TIME_SAMPLES], cq[:TIME_SAMPLES]),
@@ -126,7 +129,8 @@ def spectrum_figure(src: IQSource, freqs, power) -> dict:
                               yaxis={"title": "Power per bin (dBFS)"})}
 
 
-def waterfall_figure(src: IQSource, times, freqs, power) -> dict:
+def waterfall_figure(src: IQSource, times, freqs, power,
+                     y_title: str = "Time in recording (s)") -> dict:
     mhz = (src.center_hz + freqs) / 1e6
     lo, hi = np.percentile(power, [1, 99.9])
     return {"config": PLOT_CONFIG,
@@ -137,7 +141,7 @@ def waterfall_figure(src: IQSource, times, freqs, power) -> dict:
                       "hovertemplate": "%{x:.4f} MHz<br>t = %{y:.2f} s<br>%{z:.1f} dBFS"
                                        "<extra></extra>"}],
             "layout": _layout(xaxis={"title": "Frequency (MHz)"},
-                              yaxis={"title": "Time in recording (s)",
+                              yaxis={"title": y_title,
                                      "autorange": "reversed"})}
 
 
@@ -189,11 +193,26 @@ def histogram_figure(hist_i, hist_q) -> dict:
 
 # --- level verdict -------------------------------------------------------------------
 
+BURST_FRACTION_WARN, BURST_DB_WARN = 0.02, 3.0
+
+
+def burst_message(stats: dict) -> tuple[str, str] | None:
+    frac, peak = stats.get("burst_fraction", 0.0), stats.get("burst_max_db", 0.0)
+    if frac < BURST_FRACTION_WARN or peak < BURST_DB_WARN:
+        return None
+    return ("warning", f"Interference bursts: in {100 * frac:.0f} % of milliseconds the level "
+                       f"jumps, by up to {peak:.0f} dB. Something nearby radiates intermittently "
+                       "in the GPS band, often electronics (computers, screens, USB 3 devices). "
+                       "Move the antenna away from them; outdoors is best.")
+
+
 def level_messages(stats: dict, int8: bool) -> list[tuple[str, str]]:
     """(kind, text) pairs, kind in positive / warning / info."""
+    burst = burst_message(stats)
     if not int8:
-        return [("info", "This file stores floats, so ADC clipping can't be checked.")]
-    msgs = []
+        msgs = [("info", "This file stores floats, so ADC clipping can't be checked.")]
+        return msgs + ([burst] if burst else [])
+    msgs = [burst] if burst else []
     spread = max(stats["std_i"], stats["std_q"])
     clip = stats["clip_fraction"]
     if clip > 1e-3:
@@ -218,6 +237,10 @@ def level_messages(stats: dict, int8: bool) -> list[tuple[str, str]]:
 
 # --- the tab ---------------------------------------------------------------------------
 
+PREVIEW_ROWS = 60      # rows kept in the rolling waterfall during live preview
+PREVIEW_COLUMNS = 256  # frequency bins per row in the rolling waterfall
+
+
 class SignalTab:
     """One instance per browser tab (each client builds its own page)."""
 
@@ -225,6 +248,10 @@ class SignalTab:
         self.settings = Settings()
         self._pending = False
         self._busy = False
+        self.previewing = False
+        self._preview_rows: deque = deque(maxlen=PREVIEW_ROWS)
+        self._preview_t0 = 0.0
+        self.capture_panel = None      # set by app.py (CapturePanel)
 
     def request_update(self) -> None:
         self._pending = True
@@ -234,6 +261,8 @@ class SignalTab:
         self.request_update()
 
     def build(self) -> None:
+        if self.capture_panel is not None:
+            self.capture_panel.build()
         with ui.row().classes("w-full items-start gap-4"):
             self._build_controls()
             with ui.column().classes("flex-1 min-w-[18rem] gap-4"):
@@ -303,7 +332,42 @@ class SignalTab:
             "How often each of the 256 ADC codes occurs. The red lines are the limits; "
             "samples piling up there would mean clipping.", "adc")
 
+    # --- live preview (driven by the capture panel) ---------------------------------------
+
+    def begin_preview(self) -> None:
+        self.previewing = True
+        self._preview_rows.clear()
+        self._preview_t0 = time.monotonic()
+        self.spinner.set_visibility(False)
+
+    def end_preview(self) -> None:
+        self.previewing = False
+        self.request_update()          # back to the loaded recording
+
+    async def show_preview(self, src: IQSource) -> None:
+        """Show one short live capture in every plot."""
+        s = replace(self.settings, start_s=0.0, window_ms=max(int(src.duration_s * 1000), 1))
+        result = await run.io_bound(analyse, src, s)
+        if not self.previewing:
+            return
+        freqs, power = result["psd"]
+        # Keep the rolling waterfall light: average down to PREVIEW_COLUMNS bins
+        # (sending 60 x 1024 values every update can stall the browser link).
+        k = max(len(power) // PREVIEW_COLUMNS, 1)
+        freqs = freqs[: len(freqs) // k * k].reshape(-1, k).mean(axis=1)
+        lin = 10 ** (power[: len(power) // k * k].reshape(-1, k) / 10)
+        power = 10 * np.log10(lin.mean(axis=1))
+        self._preview_rows.append((time.monotonic() - self._preview_t0, power))
+        times = np.array([t for t, _ in self._preview_rows])
+        rows = np.array([p for _, p in self._preview_rows])
+        self.window_label.set_text(f"LIVE from the HackRF · {src.duration_s * 1000:.0f} ms per "
+                                   f"update · waterfall shows the last {len(times)} updates")
+        self._show_result(src, result, (times, freqs, rows),
+                          y_title="Time since preview started (s)")
+
     async def _tick(self) -> None:
+        if self.previewing:
+            return                     # the preview owns the plots; update later
         if self._pending and not self._busy:
             self._pending = False
             self._busy = True
@@ -334,13 +398,21 @@ class SignalTab:
         wf = await run.io_bound(cached_waterfall, src, s.remove_dc)
         elapsed = time.perf_counter() - t0
 
+        if self.previewing:
+            return                     # a live preview started meanwhile
         self.start_label.set_text(f"Start: {result['start']:.1f} s")
         self.window_label.set_text(
             f"{src.path.name}: window {result['start']:.1f} s to "
             f"{result['start'] + s.window_ms / 1000:.3f} s, FFT size {s.nfft} "
             f"(computed in {elapsed:.1f} s)")
+        self._show_result(src, result, wf)
+        self.spinner.set_visibility(False)
+
+    def _show_result(self, src: IQSource, result: dict, wf,
+                     y_title: str = "Time in recording (s)") -> None:
+        self.messages.clear()
         self.spectrum.update_figure(spectrum_figure(src, *result["psd"]))
-        self.waterfall.update_figure(waterfall_figure(src, *wf))
+        self.waterfall.update_figure(waterfall_figure(src, *wf, y_title=y_title))
         self.time.update_figure(time_figure(src, *result["time"], result["int8"]))
         self.iq.update_figure(iq_figure(*result["density"], result["int8"]))
         if result["int8"]:
@@ -348,7 +420,6 @@ class SignalTab:
         else:
             self.histogram.update_figure(_empty_figure("Not available for float files"))
         self._show_stats(result["stats"], result["int8"])
-        self.spinner.set_visibility(False)
 
     def _show_stats(self, stats: dict, int8: bool) -> None:
         unit = " codes" if int8 else ""
@@ -358,6 +429,7 @@ class SignalTab:
         if int8:
             chips += [("Clipped", f"{100 * stats['clip_fraction']:.3f} %"),
                       ("Levels used", f"{stats['levels_used']} of 256")]
+        chips.append(("Bursts", f"{100 * stats.get('burst_fraction', 0.0):.0f} % of ms"))
         self.stats_row.clear()
         with self.stats_row:
             for name, value in chips:

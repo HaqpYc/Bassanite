@@ -55,6 +55,18 @@ def test_status_without_source():
     assert stage_status(STAGES[0], None).state == "locked"
 
 
+def test_results_for_another_recording_are_flagged(tmp_path):
+    from stages import STAGE_BY_KEY, _results_from_other_recording
+    from state import DEFAULT_RECORDING
+    stage = STAGE_BY_KEY["acquisition"]
+    rec = tmp_path / "new.bin"
+    rec.write_bytes(bytes(8))
+    assert _results_from_other_recording(stage, IQSource(rec))
+    assert not _results_from_other_recording(stage, IQSource(DEFAULT_RECORDING))
+    assert not _results_from_other_recording(stage, None)
+    assert not _results_from_other_recording(STAGE_BY_KEY["signal"], IQSource(rec))
+
+
 def test_unbuilt_stages_are_locked():
     for stage in STAGES:
         if not stage.built:

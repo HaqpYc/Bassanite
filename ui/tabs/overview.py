@@ -30,12 +30,13 @@ def _pipeline(go_to: Callable[[str], None]) -> None:
                 ui.label(f"Step {stage.number}").classes("text-xs text-grey-7")
                 ui.label(stage.title).classes("text-subtitle1 font-bold leading-tight")
                 ui.label(stage.tagline).classes("text-xs text-grey-8")
-                ui.label(f"{status.icon} {status.summary}").classes("text-sm")
+                ui.label(f"{status.icon} {status.summary}").classes("text-sm break-all")
                 if status.detail:
                     ui.label(status.detail).classes("text-xs text-grey-6 font-mono break-all")
 
 
-def _input_card(open_source_dialog: Callable[[], None]) -> None:
+def _input_card(open_source_dialog: Callable[[], None],
+                go_to: Callable[[str], None]) -> None:
     with ui.card().classes("flex-1 min-w-[16rem]").props("flat bordered"):
         ui.label("Input signal").classes("text-subtitle1 font-bold")
         if state.source is None:
@@ -46,9 +47,10 @@ def _input_card(open_source_dialog: Callable[[], None]) -> None:
         with ui.row().classes("gap-2"):
             ui.button("Load a recording", icon="folder_open",
                       on_click=open_source_dialog).props("no-caps")
-            ui.button("Capture live", icon="sensors").props("no-caps outline").disable()
-        ui.label("Live capture from the HackRF arrives with the Signal tab "
-                 "(build step 2).").classes("text-xs text-grey-7")
+            ui.button("Capture live", icon="sensors", on_click=lambda: go_to("signal")) \
+                .props("no-caps outline")
+        ui.label("Capture live opens the Signal tab, where the HackRF is controlled.") \
+            .classes("text-xs text-grey-7")
 
 
 def _result_card() -> None:
@@ -76,7 +78,8 @@ def _history_card() -> None:
 
 
 def _first_run_checklist(open_source_dialog: Callable[[], None],
-                         on_changed: Callable[[], None]) -> None:
+                         on_changed: Callable[[], None],
+                         go_to: Callable[[str], None]) -> None:
     with ui.card().classes("w-full").props("flat bordered") \
             .bind_visibility_from(state, "mode", value="beginner"):
         ui.label("Getting started").classes("text-subtitle1 font-bold")
@@ -96,8 +99,11 @@ def _first_run_checklist(open_source_dialog: Callable[[], None],
         ui.checkbox("HackRF plugged in and detected (run hackrf_info)")
         ui.checkbox("GPS patch antenna connected, bias-tee on to power its amplifier")
         ui.checkbox("Antenna outdoors, with a clear view of the sky")
-        ui.label("Capturing from the app arrives in build step 2. Until then, see "
-                 "01_data_acquisition/capture_hackrf.md.").classes("text-xs text-grey-7")
+        with ui.row().classes("items-center gap-2"):
+            ui.button("Go to the Live HackRF controls", icon="sensors",
+                      on_click=lambda: go_to("signal")).props("no-caps outline")
+            ui.label("Use Check bias-tee there to confirm the antenna is powered.") \
+                .classes("text-xs text-grey-7")
 
 
 @ui.refreshable
@@ -109,7 +115,7 @@ def overview(go_to: Callable[[str], None], open_source_dialog: Callable[[], None
             md(INTRO)
         _pipeline(go_to)
         with ui.row().classes("w-full items-stretch gap-4"):
-            _input_card(open_source_dialog)
+            _input_card(open_source_dialog, go_to)
             _result_card()
             _history_card()
-        _first_run_checklist(open_source_dialog, on_changed)
+        _first_run_checklist(open_source_dialog, on_changed, go_to)
