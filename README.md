@@ -74,6 +74,11 @@ python ui/app.py                  # opens http://localhost:8080
 python -m pytest ui               # UI tests
 ```
 
+On Windows you can also **double-click `run_ui.bat`**. It uses the Python in
+`%USERPROFILE%\.venvs\bassanite` if that venv exists (or the one named by the
+`BASSANITE_PYTHON` environment variable), otherwise the `python` on your PATH. Close
+its window to stop the server.
+
 Explanation texts live in `ui/explain/<stage>/*.md` and are re-read on every page
 load, so you can edit them and refresh the browser.
 

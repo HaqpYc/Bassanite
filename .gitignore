@@ -1,1 +1,6 @@
 recordings/
+
+# Python bytecode cache: rebuilt automatically on each machine; it also embeds
+# the absolute path of every source file (user name, folders).
+__pycache__/
+*.py[cod]
