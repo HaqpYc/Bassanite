@@ -30,12 +30,15 @@ We do that per Doppler bin and non-coherently accumulate |corr|^2 over several
 
 THE DETECTION METRIC
 --------------------
-We report peak / mean of the accumulated correlation surface. Pure noise gives a
-ratio near 1; a real satellite produces a peak far above the mean. A practical
-threshold for this setup is ~2.5-3 (tune with --threshold).
+We report peak / mean of the accumulated correlation surface. Pure noise gives
+~3 (10 ms at 4 MSPS; the floor rises with the number of correlation cells); a
+real satellite produces a peak far above it. The default threshold is 5 (tune
+with --threshold); persistence across --skip-seconds is the real confirmation.
 
-Reuses the validated Gold-code generator in ../common/ca_code.py and the IQ
-loader in ../common/iq_loader.py.
+The search itself lives in ../bassanite/acquisition.py (importable, also used by
+the web UI); this script is its command line: it loads the recording, runs the
+scan, and writes the table, scan_results.csv (+ scan_results.meta.json, which
+records the recording and settings used) and scan_plot.png.
 
 Example:
   python scan_prns.py --iq recordings/capture.bin --format int8 --fs 4e6
@@ -53,53 +56,11 @@ _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from common.ca_code import upsample_code, CODE_LENGTH          # noqa: E402
+from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
+                                   DEFAULT_MS, DEFAULT_THRESHOLD, scan,
+                                   seconds_needed)
+from bassanite.provenance import write_meta                    # noqa: E402
 from common.iq_loader import load_iq                           # noqa: E402
-
-
-def acquire_prn(x, fs, prn, dop_min, dop_max, dop_step, nms):
-    """FFT parallel-code-phase acquisition of one PRN.
-
-    Returns (code_phase_samples, doppler_hz, peak_over_mean).
-    """
-    spms = int(round(fs * 1e-3))                  # samples per 1 ms code period
-    code_up = upsample_code(prn, spms).astype(np.float64)
-    CODE_CONJ = np.conj(np.fft.fft(code_up))      # precomputed once per PRN
-    t = np.arange(spms) / fs
-
-    best = (0, 0.0, 0.0)
-    for dop in np.arange(dop_min, dop_max + 1, dop_step):
-        carrier = np.exp(-1j * 2 * np.pi * dop * t)   # carrier wipe-off for this bin
-        acc = np.zeros(spms)
-        for k in range(nms):
-            seg = x[k * spms:(k + 1) * spms]
-            if len(seg) < spms:
-                break
-            corr = np.fft.ifft(np.fft.fft(seg * carrier) * CODE_CONJ)
-            acc += np.abs(corr) ** 2                   # non-coherent accumulation
-        peak, mean = acc.max(), acc.mean()
-        ratio = peak / mean if mean > 0 else 0.0
-        if ratio > best[2]:
-            best = (int(acc.argmax()), float(dop), float(ratio))
-    return best
-
-
-def scan(x, fs, dop_min, dop_max, dop_step, nms, threshold):
-    spms = int(round(fs * 1e-3))
-    results = []
-    for prn in range(1, 33):
-        cp, dop, ratio = acquire_prn(x, fs, prn, dop_min, dop_max, dop_step, nms)
-        chips = cp * float(CODE_LENGTH) / spms
-        results.append({
-            "prn": prn,
-            "doppler_hz": dop,
-            "code_phase_samp": cp,
-            "code_phase_chips": chips,
-            "peak_over_mean": ratio,
-            "detected": ratio >= threshold,
-        })
-    results.sort(key=lambda r: r["peak_over_mean"], reverse=True)
-    return results
 
 
 def print_table(results, threshold):
@@ -164,15 +125,15 @@ def main():
     ap.add_argument("--format", default="int8",
                     help="int8 (HackRF) or complex64 (gr_complex)")
     ap.add_argument("--fs", type=float, default=4e6, help="sample rate (Hz)")
-    ap.add_argument("--dop-range", type=float, default=10000.0,
+    ap.add_argument("--dop-range", type=float, default=DEFAULT_DOP_RANGE_HZ,
                     help="+/- Doppler search range (Hz)")
-    ap.add_argument("--dop-step", type=float, default=250.0,
+    ap.add_argument("--dop-step", type=float, default=DEFAULT_DOP_STEP_HZ,
                     help="Doppler search step (Hz)")
-    ap.add_argument("--ms", type=int, default=10,
+    ap.add_argument("--ms", type=int, default=DEFAULT_MS,
                     help="number of 1 ms periods to non-coherently integrate")
     ap.add_argument("--skip-seconds", type=float, default=0.0,
                     help="skip this many seconds from the start of the file")
-    ap.add_argument("--threshold", type=float, default=5.0,
+    ap.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
                     help="peak/mean detection threshold (noise floor here is ~3.5 "
                          "for 10 ms @ 4 MSPS; persistence across --skip-seconds is "
                          "the real confirmation)")
@@ -180,7 +141,7 @@ def main():
     ap.add_argument("--plot", default=os.path.join(_HERE, "scan_plot.png"))
     a = ap.parse_args()
 
-    load_secs = (a.ms + 5) / 1000.0               # just enough + small margin
+    load_secs = seconds_needed(a.ms)              # just enough + small margin
     x = load_iq(a.iq, a.format, a.fs, seconds=load_secs,
                 skip_seconds=a.skip_seconds)
     rms = float(np.sqrt(np.mean(np.abs(x) ** 2))) if x.size else 0.0
@@ -193,6 +154,9 @@ def main():
                    a.threshold)
     print_table(results, a.threshold)
     write_csv(results, a.csv)
+    write_meta(a.csv, "acquisition", a.iq, a.format, a.fs,
+               {"dop_range_hz": a.dop_range, "dop_step_hz": a.dop_step, "ms": a.ms,
+                "skip_seconds": a.skip_seconds, "threshold": a.threshold})
     write_plot(results, a.threshold, a.plot)
 
 

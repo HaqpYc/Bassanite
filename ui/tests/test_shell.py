@@ -55,16 +55,36 @@ def test_status_without_source():
     assert stage_status(STAGES[0], None).state == "locked"
 
 
-def test_results_for_another_recording_are_flagged(tmp_path):
-    from stages import STAGE_BY_KEY, _results_from_other_recording
+def test_results_for_another_recording_are_flagged(tmp_path, monkeypatch):
+    import stages
+    from bassanite.provenance import write_meta
     from state import DEFAULT_RECORDING
-    stage = STAGE_BY_KEY["acquisition"]
+    stage = stages.STAGE_BY_KEY["acquisition"]
     rec = tmp_path / "new.bin"
     rec.write_bytes(bytes(8))
-    assert _results_from_other_recording(stage, IQSource(rec))
-    assert not _results_from_other_recording(stage, IQSource(DEFAULT_RECORDING))
-    assert not _results_from_other_recording(stage, None)
-    assert not _results_from_other_recording(STAGE_BY_KEY["signal"], IQSource(rec))
+    other = tmp_path / "other.bin"
+    other.write_bytes(bytes(8))
+
+    # Point the stage's results at a temporary folder.
+    monkeypatch.setattr(stages, "REPO_ROOT", tmp_path)
+    results = tmp_path / stage.output_files[0]
+    results.parent.mkdir(parents=True)
+    results.write_text("prn\n")
+
+    # No provenance file: results are assumed to be for capture.bin.
+    assert stages._results_from_other_recording(stage, IQSource(rec))
+    assert not stages._results_from_other_recording(stage, IQSource(DEFAULT_RECORDING))
+    assert stages.results_source_name(stage) == DEFAULT_RECORDING.name
+
+    # With provenance: the named recording, and only it, matches.
+    write_meta(results, "acquisition", rec, "int8", 4e6, {})
+    assert not stages._results_from_other_recording(stage, IQSource(rec))
+    assert stages._results_from_other_recording(stage, IQSource(other))
+    assert stages.results_source_name(stage) == "new.bin"
+
+    assert not stages._results_from_other_recording(stage, None)
+    assert not stages._results_from_other_recording(stages.STAGE_BY_KEY["signal"],
+                                                    IQSource(rec))
 
 
 def test_unbuilt_stages_are_locked():
@@ -97,10 +117,11 @@ def test_panel_parses_and_math_renders(stage_key, name):
 
 @pytest.mark.parametrize("stage_key,name", _all_panels())
 def test_code_reference_points_at_a_real_function(stage_key, name):
-    ref = load_panel(stage_key, name).code_ref
-    if ref is None:
+    refs = load_panel(stage_key, name).code_refs
+    if not refs:
         pytest.skip("panel has no code yet")
-    assert function_source(ref).startswith("def ")
+    for ref in refs:
+        assert function_source(ref).startswith("def ")
 
 
 def test_function_source_errors():

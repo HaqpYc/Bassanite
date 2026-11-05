@@ -26,9 +26,20 @@ in order:
 | 04 | `04_decoding/` | Bit & frame sync, decode the navigation message (ephemeris, clock, time) | ⏳ planned |
 | 05 | `05_positioning/` | Pseudoranges → solve receiver lat/lon/alt + clock bias (PVT) | ⏳ planned |
 
+Each stage's algorithm lives in the importable [`bassanite/`](bassanite/) package
+(used by both the command-line scripts in the numbered folders and the web UI):
+- [`bassanite/acquisition.py`](bassanite/acquisition.py) — stage 02 search.
+- [`bassanite/tracking.py`](bassanite/tracking.py) — stage 03 loops, bit sync, C/N0.
+- [`bassanite/provenance.py`](bassanite/provenance.py) — each result file gets a
+  `<name>.meta.json` recording which recording and settings produced it.
+
 Shared, reusable pieces live in [`common/`](common/):
 - [`common/ca_code.py`](common/ca_code.py) — GPS L1 C/A Gold-code (PRN) generator.
 - [`common/iq_loader.py`](common/iq_loader.py) — load HackRF int8 / gr_complex IQ.
+- [`common/signal_view.py`](common/signal_view.py) — spectrum, waterfall, ADC levels,
+  interference bursts.
+- [`common/hackrf.py`](common/hackrf.py) — record from a HackRF (receive only),
+  bias-tee check.
 
 ## Quick start
 

@@ -77,6 +77,13 @@ Key flags: `--from-csv` (stage-02 seeds, default `02_acquisition/scan_results.cs
 `--all` (track all 32, not just detected), `--pll-bw`/`--dll-bw`,
 `--seconds`/`--skip-seconds`, `--out-dir`, `--no-plot`.
 
+The loops and helpers named on this page (`track_prn()`, `calc_loop_coef()`,
+`fine_doppler()`, `bit_sync()`, `estimate_cn0()`) live in
+[`../bassanite/tracking.py`](../bassanite/tracking.py); `track.py` is the command
+line. `track_prn(..., detail=True)` also returns the Early/Late correlators and both
+discriminator outputs per ms. `tracking_summary.csv` gets a
+`tracking_summary.meta.json` recording which recording and settings produced it.
+
 > Memory note: tracking needs the whole window in RAM (~1 GB for 30 s of int8 as
 > complex64). Use `--seconds` to cap it.
 

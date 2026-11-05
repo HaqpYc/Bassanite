@@ -249,11 +249,12 @@ contract between stages, so the UI and the command-line scripts stay interchange
 ---
 
 ## 6. Build order
-1. **Shell:** header, mode and math toggles, Overview with the pipeline diagram, and
+1. ✅ **Shell:** header, mode and math toggles, Overview with the pipeline diagram, and
    tab placeholders.
-2. **Signal tab with file loading** (offline first), then live capture and the
+2. ✅ **Signal tab with file loading** (offline first), then live capture and the
    bias-tee check.
-3. **Backend refactor** into importable modules, plus the surface and correlator outputs.
+3. ✅ **Backend refactor** into importable modules (`bassanite/`), plus the surface
+   and correlator outputs, progress callbacks, and provenance files for results.
 4. **Acquisition tab** with "Meet the codes" and the Try-it sliders.
 5. **Tracking tab** with the time scrubber.
 6. **Stages 04 and 05:** each backend stage ships with its tab, following the

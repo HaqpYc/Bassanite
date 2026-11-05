@@ -69,8 +69,14 @@ python 02_acquisition/scan_prns.py
 python 02_acquisition/scan_prns.py --iq path\to\file.dat --format complex64 \
     --fs 4e6 --dop-range 10000 --dop-step 250 --ms 10 --threshold 5.0
 ```
-Outputs: a table on stdout, `scan_results.csv`, and `scan_plot.png` (peak/mean per
-PRN with the threshold line).
+Outputs: a table on stdout, `scan_results.csv` (+ `scan_results.meta.json`: which
+recording and settings produced it), and `scan_plot.png` (peak/mean per PRN with the
+threshold line).
+
+The search itself is in [`../bassanite/acquisition.py`](../bassanite/acquisition.py)
+(`correlation_surface()`, `acquire_prn()`, `scan()`); `scan_prns.py` is its command
+line. `acquire_prn(..., return_surface=True)` also returns the full
+Doppler × code-phase correlation surface.
 
 ---
 

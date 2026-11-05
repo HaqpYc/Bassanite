@@ -9,11 +9,11 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from state import DEFAULT_RECORDING, REPO_ROOT, IQSource
+from state import DEFAULT_RECORDING, REPO_ROOT, IQSource  # first: sets sys.path
 
-# A tracked satellite counts as locked when |Q_P|/|I_P| stays well below this
-# (see 03_tracking/NOTES.md, "C/N0 and the lock indicator").
-LOCK_QI_MAX = 0.3
+from bassanite.provenance import read_meta, same_recording  # noqa: E402
+from bassanite.tracking import LOCK_QI_MAX  # noqa: E402,F401  (|Q|/|I| lock threshold)
+
 MIN_SATS_FOR_FIX = 4
 
 
@@ -109,17 +109,26 @@ def _tracking_status() -> StageStatus:
     return StageStatus("done", summary, f"from {path}")
 
 
-def _results_from_other_recording(stage: Stage, source: IQSource | None) -> bool:
-    """True when the stage's result files can't belong to the loaded recording.
+def results_source_name(stage: Stage) -> str:
+    """File name of the recording the stage's results on disk came from."""
+    meta = read_meta(REPO_ROOT / stage.output_files[0]) if stage.output_files else None
+    return Path(meta["source"]["path"]).name if meta else DEFAULT_RECORDING.name
 
-    The result files don't record which recording they came from, and file dates
-    are unreliable (copying a file changes them). The stage scripts read
-    recordings/capture.bin by default, so results on disk are taken to come from
-    it; any other loaded recording is flagged. (The planned run history will
-    record the real provenance.)
+
+def _results_from_other_recording(stage: Stage, source: IQSource | None) -> bool:
+    """True when the stage's result files don't belong to the loaded recording.
+
+    Results written by the current stage scripts carry a provenance file
+    (<result>.meta.json, see bassanite/provenance.py) naming their recording.
+    Older results have none; the scripts read recordings/capture.bin by default,
+    so those are taken to come from it. (File dates can't tell: copying a
+    recording changes its date.)
     """
     if source is None or not stage.output_files:
         return False
+    meta = read_meta(REPO_ROOT / stage.output_files[0])
+    if meta is not None:
+        return not same_recording(meta, source.path)
     return Path(source.path).resolve() != DEFAULT_RECORDING.resolve()
 
 
@@ -136,7 +145,7 @@ def stage_status(stage: Stage, source: IQSource | None) -> StageStatus:
         raise ValueError(f"no status rule for stage {stage.key!r}")
     if status.state == "done" and _results_from_other_recording(stage, source):
         return StageStatus("attention",
-                           f"Results on disk are for {DEFAULT_RECORDING.name}, not "
+                           f"Results on disk are for {results_source_name(stage)}, not "
                            f"{source.path.name}: run this step on it",
                            status.detail)
     return status

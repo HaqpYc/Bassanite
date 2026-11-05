@@ -14,8 +14,9 @@ Each stage has a folder ui/explain/<stage>/ containing:
       ## Math
       equations in LaTeX ($inline$ or $$block$$)...
 
-The `code:` line is optional. The Code tab shows that function's source, read
-from the file at runtime, so the explanation always shows the code that runs.
+The `code:` line is optional and may list several functions, separated by
+commas. The Code tab shows their source, read from the files at runtime, so the
+explanation always shows the code that runs.
 """
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ class Panel:
     title: str
     intuition: str
     math: str
-    code_ref: str | None   # "path/to/file.py::function_name"
+    code_refs: tuple[str, ...]   # each "path/to/file.py::function_name"
 
 
 def load_story(stage_key: str) -> str:
@@ -61,11 +62,12 @@ def load_panel(stage_key: str, name: str) -> Panel:
     parts = _SECTION_RE.split(body)
     # parts = [preamble, "Intuition", text, "Math", text, ...]
     sections = {parts[i]: parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
+    refs = tuple(r.strip() for r in meta.get("code", "").split(",") if r.strip())
     return Panel(
         title=meta.get("title", name),
         intuition=sections.get("Intuition", ""),
         math=sections.get("Math", ""),
-        code_ref=meta.get("code") or None,
+        code_refs=refs,
     )
 
 

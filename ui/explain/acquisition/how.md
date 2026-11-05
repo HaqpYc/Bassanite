@@ -1,6 +1,6 @@
 ---
 title: How a buried satellite is found
-code: 02_acquisition/scan_prns.py::acquire_prn
+code: bassanite/acquisition.py::correlation_surface, bassanite/acquisition.py::acquire_prn
 ---
 ## Intuition
 

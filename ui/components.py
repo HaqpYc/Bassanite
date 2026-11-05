@@ -60,21 +60,22 @@ def explain_panel(stage_key: str, name: str) -> None:
             with ui.tab_panel("math"):
                 md(panel.math)
             with ui.tab_panel("code"):
-                _code_view(panel.code_ref)
+                _code_view(panel.code_refs)
 
 
-def _code_view(code_ref: str | None) -> None:
-    if code_ref is None:
+def _code_view(code_refs: tuple[str, ...]) -> None:
+    if not code_refs:
         ui.label("No code yet: this stage is planned.").classes("text-grey-7")
         return
-    try:
-        source = function_source(code_ref)
-    except (FileNotFoundError, LookupError) as err:
-        ui.label(f"Could not read the source: {err}").classes("text-negative")
-        return
-    ui.label(f"The function that runs, read live from {code_ref.replace('::', ' → ')}()") \
-        .classes("text-xs text-grey-7")
-    ui.code(source).classes("w-full")
+    for code_ref in code_refs:
+        try:
+            source = function_source(code_ref)
+        except (FileNotFoundError, LookupError) as err:
+            ui.label(f"Could not read the source: {err}").classes("text-negative")
+            continue
+        ui.label(f"The function that runs, read live from "
+                 f"{code_ref.replace('::', ' → ')}()").classes("text-xs text-grey-7")
+        ui.code(source).classes("w-full")
 
 
 def story(stage_key: str) -> None:
