@@ -15,7 +15,7 @@ from bassanite.acquisition import code_drift_chips_per_s
 from bassanite.tracking import (DETAIL_KEYS, MS_PER_BIT, bit_sync, bit_sync_scores,
                                 costas_error, dll_error)
 from state import IQSource, state
-from synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps, write_int8
+from bassanite.synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps, write_int8
 
 SECONDS = 0.6
 

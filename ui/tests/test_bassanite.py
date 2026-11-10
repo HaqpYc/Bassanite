@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from bassanite import acquisition, provenance, tracking
-from synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps
+from bassanite.synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps
 
 
 @pytest.fixture(scope="module")
@@ -144,3 +144,39 @@ def test_provenance_round_trip(tmp_path):
     assert not provenance.same_recording(meta, rec)
     assert provenance.read_meta(tmp_path / "none.csv") is None
     json.loads(path.read_text())                        # valid JSON
+
+
+# --- the synthetic signal ------------------------------------------------------------------
+
+def test_synthetic_blocks_equal_the_whole_and_files_round_trip(tmp_path):
+    from bassanite import synthetic
+    sats = ((PRN, CODE_PHASE_SAMP, DOPPLER), (12, 400, -2100.0))
+    whole = synthetic.synthetic_gps(0.25, sats=sats)
+    pieces = np.concatenate(list(synthetic.synthetic_blocks(0.25, sats=sats)))
+    assert np.array_equal(whole, pieces)
+    assert np.array_equal(synthetic.synthetic_gps(0.15, sats=sats), whole[:int(0.15 * FS)])
+
+    path = synthetic.write_recording(tmp_path / "sky.bin", 0.12, cn0_dbhz=46.0, fs=2e6)
+    assert path.stat().st_size == 2 * int(0.12 * 2e6)
+    truth = synthetic.read_truth(path)
+    assert truth["fs"] == 2e6 and len(truth["satellites"]) == len(synthetic.DEFAULT_SATS)
+    s0 = truth["satellites"][0]
+    assert s0["code_phase_samp"] == pytest.approx(s0["code_phase_chips"] * 2000 / 1023)
+    assert synthetic.read_truth(tmp_path / "real.bin") is None
+
+
+def test_scan_finds_every_true_satellite_of_a_synthetic_sky(tmp_path):
+    from bassanite import synthetic
+    from common.iq_loader import load_iq
+    path = synthetic.write_recording(tmp_path / "sky.bin", 0.05, cn0_dbhz=46.0)
+    x = load_iq(path, "int8", FS)
+    truth = synthetic.read_truth(path)["satellites"]
+    results = acquisition.scan(x, FS, -5000, 5000, 250, 10, 5.0,
+                               prns=[s["prn"] for s in truth] + [1, 2])
+    found = {r["prn"]: r for r in results if r["detected"]}
+    assert set(found) == {s["prn"] for s in truth}
+    for s in truth:
+        r = found[s["prn"]]
+        assert abs(r["code_phase_samp"] - s["code_phase_samp"]) <= 1
+        assert abs(r["doppler_hz"] - s["doppler_hz"]) <= 250   # within one 250 Hz step
+        assert abs(r["fine_doppler_hz"] - s["doppler_hz"]) <= 25

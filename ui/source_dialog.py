@@ -3,11 +3,23 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from nicegui import ui
+from pathlib import Path
 
-from state import GPS_L1_HZ, IQSource, default_source, guess_format, state  # sets sys.path
+from nicegui import run, ui
 
+from state import (GPS_L1_HZ, REPO_ROOT, IQSource, default_source,  # sets sys.path
+                   guess_format, state)
+
+from bassanite.synthetic import read_truth, write_recording  # noqa: E402
 from common.hackrf import read_sidecar  # noqa: E402
+
+RECORDINGS_DIR = REPO_ROOT / "recordings"     # git-ignored
+
+
+def synthetic_recording_path(cn0_dbhz: int, seconds: float, fs: float) -> Path:
+    """Where a synthetic recording with these settings is written (and reused)."""
+    return RECORDINGS_DIR / f"synthetic_{cn0_dbhz}dBHz_{seconds:g}s_{fs / 1e6:g}MSPS.bin"
+
 
 FORMATS = {
     "int8": "int8: HackRF (hackrf_transfer)",
@@ -77,6 +89,46 @@ def source_dialog(on_loaded: Callable[[], None]) -> ui.dialog:
             dialog.close()
             on_loaded()
             ui.notify(f"Loaded {src.describe()}", type="positive")
+
+        with ui.expansion("Or make a synthetic recording", icon="science") \
+                .classes("w-full border rounded-lg"):
+            ui.label("Six satellites with known PRN, code phase and Doppler, in noise. "
+                     "Lower the signal strength to watch them sink into the noise: the "
+                     "Find satellites tab shows the true values next to what it finds.") \
+                .classes("text-sm text-grey-8")
+            with ui.row().classes("w-full items-center no-wrap gap-2"):
+                ui.label("Signal strength (C/N0)").classes("text-sm w-44")
+                cn0 = ui.slider(min=30, max=50, step=1, value=45).classes("flex-1")
+                ui.label().bind_text_from(cn0, "value", lambda v: f"{v} dB-Hz") \
+                    .classes("text-sm w-16")
+            with ui.row().classes("w-full items-end no-wrap gap-4"):
+                seconds = ui.number("Length", value=3, min=1, max=60, step=1,
+                                    suffix="s").classes("flex-1")
+                rate = ui.select({4e6: "4 MSPS", 2e6: "2 MSPS"}, value=4e6,
+                                 label="Sample rate").classes("flex-1")
+                make_button = ui.button("Make and load", icon="play_arrow") \
+                    .props("no-caps")
+            synth_info = ui.label("Real satellites are 37–43 dB-Hz in capture.bin. "
+                                  "Generating takes about 2 s per second of signal.") \
+                .classes("text-xs text-grey-7")
+
+            async def make() -> None:
+                c, s, f = int(cn0.value), float(seconds.value or 3), float(rate.value)
+                path = synthetic_recording_path(c, s, f)
+                make_button.disable()
+                synth_info.set_text(f"Generating {path.name}…")
+                try:
+                    if not path.is_file() or read_truth(path) is None:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        await run.io_bound(write_recording, path, s, float(c), f)
+                except OSError as err:
+                    synth_info.set_text(f"Could not write the recording: {err}")
+                    return
+                finally:
+                    make_button.enable()
+                load(IQSource(path, "int8", f))
+
+            make_button.on_click(make)
 
         with ui.row().classes("w-full justify-end gap-2"):
             bundled = default_source()

@@ -11,7 +11,7 @@ import tabs.acquisition as acq
 from bassanite.acquisition import acquire_prn, cn0_from_peak, code_drift_chips_per_s
 from common.ca_code import CODE_LENGTH, G2_TAPS, ca_code, register_states
 from state import IQSource, state
-from synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps, write_int8
+from bassanite.synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps, write_int8
 
 
 # --- meet the codes -------------------------------------------------------------------------
@@ -207,3 +207,19 @@ def test_axis_titles_use_the_plotly_3_form():
         axes = [lay["scene"][k] for k in ("xaxis", "yaxis", "zaxis")] if three_d \
             else [lay["xaxis"], lay["yaxis"]]
         assert all(isinstance(a["title"], dict) for a in axes)
+
+
+def test_truth_overlay_for_a_synthetic_recording(tmp_path):
+    from bassanite.synthetic import read_truth, write_recording
+    path = write_recording(tmp_path / "sky.bin", 0.05, cn0_dbhz=46.0)
+    src = IQSource(path, "int8", FS)
+    results = acq.run_scan(src, acq.ScanSettings(dop_range_hz=5000))
+    truth = read_truth(path)
+    fig = acq.bars_figure(results, 5.0, 3, truth)
+    stars = fig["data"][1]
+    assert sorted(stars["x"]) == sorted(t["prn"] for t in truth["satellites"])
+    rows = {r["prn"]: r for r in acq.handover_rows(results, truth)}
+    assert rows[3]["truth"].startswith("-3210 Hz") and rows[1]["truth"] == "not in the signal"
+    assert [c["name"] for c in acq.handover_columns(truth)][-1] == "truth"
+    assert acq.handover_columns(None) == acq.HANDOVER_COLUMNS
+    assert len(acq.bars_figure(results, 5.0, 3)["data"]) == 1        # real recording: no stars

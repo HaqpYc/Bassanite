@@ -20,6 +20,7 @@ from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  #
                                    write_results)
 from bassanite.provenance import read_meta, write_meta  # noqa: E402
 from bassanite.results import scan_csv  # noqa: E402
+from bassanite.synthetic import read_truth  # noqa: E402
 from common.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,  # noqa: E402
                             REGISTER_STAGES, ca_code, register_states)
 from common.iq_loader import load_iq  # noqa: E402
@@ -361,7 +362,10 @@ def correlation_figure(prn: int, other: int) -> dict:
                       "showarrow": True, "ax": 70, "ay": 10}])
 
 
-def bars_figure(results: list[dict], threshold: float, selected: int) -> dict:
+def bars_figure(results: list[dict], threshold: float, selected: int,
+                truth: dict | None = None) -> dict:
+    """The peak/mean bar chart; with a synthetic recording's `truth`, a star marks
+    each satellite that is really in the signal."""
     by_prn = {r["prn"]: r for r in results}
     rows = [by_prn[p] for p in PRNS if p in by_prn]
     noise = [r["peak_over_mean"] for r in rows if not r["detected"]]
@@ -378,6 +382,20 @@ def bars_figure(results: list[dict], threshold: float, selected: int) -> dict:
                       "yanchor": "top", "showarrow": False,
                       "text": f"noise floor ≈ {floor:.1f}", "bgcolor": LABEL_BG,
                       "font": {"color": "#616161", "size": 11}})
+    extra = []
+    if truth:
+        true_prns = [t["prn"] for t in truth["satellites"] if t["prn"] in by_prn]
+        extra.append({"type": "scatter", "mode": "markers", "x": true_prns,
+                      "y": [round(by_prn[p]["peak_over_mean"], 2) * 1.12 + 0.6
+                            for p in true_prns],
+                      "marker": {"symbol": "star", "size": 12, "color": HIGHLIGHT,
+                                 "line": {"color": "#5d4037", "width": 1}},
+                      "hovertemplate": "PRN %{x} is in the signal<extra></extra>"})
+        notes.append({"xref": "paper", "yref": "paper", "x": 0, "y": 1.0,
+                      "xanchor": "left", "yanchor": "bottom", "showarrow": False,
+                      "text": f"★ really in this synthetic signal "
+                              f"(C/N0 {truth['cn0_dbhz']:g} dB-Hz)",
+                      "font": {"size": 11, "color": "#5d4037"}})
     return figure(
         [{"type": "bar", "x": [r["prn"] for r in rows],
           "y": [round(r["peak_over_mean"], 2) for r in rows],
@@ -388,7 +406,8 @@ def bars_figure(results: list[dict], threshold: float, selected: int) -> dict:
           "textposition": "outside",
           "customdata": [[r["doppler_hz"], r["code_phase_chips"]] for r in rows],
           "hovertemplate": "PRN %{x}<br>peak/mean %{y}<br>Doppler %{customdata[0]:+.0f} Hz"
-                           "<br>code phase %{customdata[1]:.1f} chips<extra></extra>"}],
+                           "<br>code phase %{customdata[1]:.1f} chips<extra></extra>"}]
+        + extra,
         shapes=shapes, annotations=notes, showlegend=False, bargap=0.25,
         xaxis={"title": "Satellite (PRN) · click a bar to look at it", "tickmode": "array",
                "tickvals": list(PRNS), "tickfont": {"size": 10}},
@@ -522,7 +541,24 @@ HANDOVER_COLUMNS = [
 ]
 
 
-def handover_rows(results: list[dict]) -> list[dict]:
+TRUTH_COLUMN = {"name": "truth", "label": "True values (synthetic)", "field": "truth"}
+
+
+def handover_columns(truth: dict | None) -> list[dict]:
+    return HANDOVER_COLUMNS + ([TRUTH_COLUMN] if truth else [])
+
+
+def handover_rows(results: list[dict], truth: dict | None = None) -> list[dict]:
+    true = {t["prn"]: t for t in (truth or {}).get("satellites", [])}
+    rows = _handover_rows(results)
+    for row in rows:
+        t = true.get(row["prn"])
+        row["truth"] = (f"{t['doppler_hz']:+.0f} Hz · {t['code_phase_chips']:.1f} chips"
+                        if t else ("not in the signal" if truth else ""))
+    return rows
+
+
+def _handover_rows(results: list[dict]) -> list[dict]:
     return [{"prn": r["prn"], "doppler": f"{r['doppler_hz']:+.0f}",
              "fine": ("" if r.get("fine_doppler_hz") is None
                       else f"{r['fine_doppler_hz']:+.0f}"),
@@ -907,9 +943,13 @@ class AcquisitionTab:
             self.scan_label.set_text("No satellite found. Is the antenna outdoors with a "
                                      "clear view of the sky, and powered (bias-tee on)?")
         self.scan_detail.set_text(f"{detail} Results: {rel_path(results_csv(src))}")
-        self.bars.update_figure(bars_figure(self.results, s.threshold, self.selected))
-        self.handover.rows = handover_rows([r for r in self.results if r["detected"]])
-        self.handover_all.rows = handover_rows(sorted(self.results, key=lambda r: r["prn"]))
+        truth = read_truth(src.path)
+        self.bars.update_figure(bars_figure(self.results, s.threshold, self.selected, truth))
+        for table in (self.handover, self.handover_all):
+            table.columns = handover_columns(truth)
+        self.handover.rows = handover_rows([r for r in self.results if r["detected"]], truth)
+        self.handover_all.rows = handover_rows(sorted(self.results, key=lambda r: r["prn"]),
+                                               truth)
 
     # --- one PRN ----------------------------------------------------------------------------
 
@@ -939,8 +979,9 @@ class AcquisitionTab:
             return                      # another satellite was picked meanwhile
         self.view = view
         if self.results is not None:
+            truth = read_truth(state.source.path) if state.source else None
             self.bars.update_figure(bars_figure(self.results, self.active.threshold,
-                                                self.selected))
+                                                self.selected, truth))
         found = view.peak_over_mean >= self.active.threshold
         self.view_label.set_text(
             f"PRN {view.prn}: peak at code phase "
