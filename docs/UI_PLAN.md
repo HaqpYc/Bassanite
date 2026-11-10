@@ -220,6 +220,7 @@ end of the chain.
 
 ## 4. Outputs and history
 - Each run is saved to `runs/<timestamp>/` with `config.json` plus the stage files.
+  (Section 7, B3, recommends keying these folders by recording.)
 - Exports per stage: CSV, NPZ and PNG, plus the IQ recording for live captures.
   Stage 05 adds KML/GPX.
 - **Session report:** a one-click HTML export of the Overview and the key plots.
@@ -263,3 +264,54 @@ contract between stages, so the UI and the command-line scripts stay interchange
    (`track.py --progress`) whose results replace the old ones only on success.
 6. **Stages 04 and 05:** each backend stage ships with its tab, following the
    five-block layout above.
+   - Before stage 04: B1, B3 and B4 of section 7 (a longer recording, one results
+     folder per recording, file formats defined in one place).
+   - With the longer recording: B2 (read the recording in blocks).
+   - The other items of section 7 can be done at any time.
+
+---
+
+## 7. Review recommendations (2026-11-10)
+
+From a review of stages 01–03 and their tabs against the project's goal: modular
+and educational. Nothing here is built yet. Within each table, the most important
+item comes first.
+
+### Finding: `capture.bin` is too short for a position fix
+
+Checked on the bits saved in `03_tracking/track_PRN*.npz`:
+
+- All 7 locked satellites pass parity on **49 of 49** complete words, so the bits
+  are clean and decoding should be straightforward.
+- The recording starts 27 bits (0.54 s) before a subframe 2. It holds subframes
+  **2, 3, 4 and 5 complete**, then **subframe 1 cut by the end of the file**: words
+  1–9 are there, word 10 is not.
+- Word 10 of subframe 1 carries `af0`, the satellite clock bias (up to about ±1 ms,
+  which is ±300 km of range, different for each satellite). Of its 30 bits, 27 are
+  at the start of the file, 2 at the end, and 1 was never recorded.
+
+1499 bits can never hold five complete subframes (1500 bits), so a 30 s recording
+always cuts one. Subframes 1, 2 and 3 are each complete at least once only from
+**36 s** of signal (plus pull-in time).
+
+### Backend and structure
+
+| # | Recommendation | Why |
+|---|---|---|
+| B1 | **Record 40–60 s outdoors** and use it as the reference for stages 04–05. Change the tracking default (`DEFAULT_SECONDS = 30` in `ui/tabs/tracking.py`, whose comment says 30 s holds every subframe) | See the finding above: `capture.bin` lacks `af0` |
+| B2 | **Read the recording in blocks** (memory-map the int8 file, convert each block) instead of loading it all as complex64 | 30 s costs about 960 MB, and 60 s would cost about 1.9 GB, more than this machine has free. Tracking only touches about 4000 samples per step. This removes the reason for the memory warning and the 10 s `reconnect_timeout` |
+| B3 | **One results folder per recording**, git-ignored (the `runs/` idea of section 4, keyed by recording rather than by time alone) | Scan and Track write into the git-tracked `02_acquisition/` and `03_tracking/`, so a button press overwrites committed files, and only one recording's results can exist at a time. Each new stage adds more files to that single slot |
+| B4 | **Define each file format in one place**, with save and load next to the algorithm in `bassanite/` | `scan_results.csv` has three readers (`bassanite/acquisition.py`, `bassanite/tracking.py`, `ui/stages.py`). The track `.npz` is written in `03_tracking/track.py` and read in `ui/tabs/tracking.py`. The summary CSV is written in `track.py` and read in two UI files. Stage 04 would be one more reader |
+| B5 | **Move receiver algorithms out of the UI:** `persistence()` and `refine_doppler()` from `ui/tabs/acquisition.py` into `bassanite/acquisition.py`, with a command-line option for the persistence check. Make the refined Doppler part of what acquisition hands over | Tracking has its own, different `fine_doppler()`, so there are two fine-Doppler searches. The persistence check is how a weak detection is confirmed, yet only the UI can run it |
+| B6 | **Split `track_prn` into the blocks of the textbook diagram:** correlators, discriminators, loop filter, oscillator, with one `step()` per satellite and per millisecond | The loop-filter update is written inline twice, so the "loops" panel's Code tab shows only `calc_loop_coef`, not the equation its Math tab explains. Named blocks also allow the "break it" switches (U4) and tracking every satellite in one pass over the file |
+| B7 | **Packaging** (low priority): a `pyproject.toml` with an editable install, `common/` folded into `bassanite/`, backend tests out of `ui/tests/` | 11 `sys.path.insert` calls, 43 `noqa: E402` markers, and the L1 frequency defined four times |
+
+### Explanations and UI
+
+| # | Recommendation | Why |
+|---|---|---|
+| U1 | **Show the Intuition text by default in Beginner mode**, next to its plot. Keep Math and Code behind "Show the math" | Intuition is the best teaching content, but it sits inside collapsed "How is this computed?" panels opened by a switch labelled "math". A beginner sees only the story strip and short captions |
+| U2 | **Fill the numbers in from the current run** (the "actual values from this run" of section 2): placeholders in the `.md` files, filled by the tab. Label `capture.bin` figures as a worked example | The panels hardcode `capture.bin` values and defaults (4 MSPS, 324,000 cells, 10 ms, PRN 20's figures: 12 mentions across 8 panels). With another recording, sample rate or setting they are wrong |
+| U3 | **A despreading demo between steps 1 and 2:** the spectrum of the raw samples, then of the same samples multiplied by the aligned code, where a spike appears at the Doppler frequency | The Signal tab ends on "no FFT size can make it appear". This shows the moment it does appear, and why the Doppler search is a frequency search |
+| U4 | **Track tab: a block diagram of the two loops** as the tab's map (like the shift-register drawing), **and "break it" switches:** `atan2` instead of `atan`, carrier aiding off, a rounded number of samples per code period | These replay the real bugs described in `03_tracking/NOTES.md`. Watching the lock fail teaches more than the bandwidth slider alone. Needs B6 |
+| U5 | **Make the synthetic signal a selectable source** (move `ui/tests/synthetic.py` into `bassanite/`), with a signal-strength slider | A simulator with known truth shows a satellite sinking into the noise, and gives stages 04 and 05 an end-to-end test with a known answer (known ephemeris, known position) |
