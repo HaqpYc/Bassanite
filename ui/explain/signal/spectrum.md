@@ -43,4 +43,4 @@ $$P_{\mathrm{noise}} = \sigma^2 \frac{\sum_n w[n]^2}{\left(\sum_n w[n]\right)^2}
 so the floor drops 3 dB each time $N$ doubles. A narrow tone keeps its level and
 stands out more. GPS is spread over 2 MHz, so its power per bin drops exactly like
 the noise: **no FFT size can make it appear.** Only correlation with the satellite's
-code can (next step).
+code can: step 2 opens with that moment, "The moment GPS appears".

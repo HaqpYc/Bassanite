@@ -140,6 +140,19 @@ def scan_seconds(nms):
     return seconds_needed(max(nms, FINE_MS))
 
 
+def despread(x, fs, prn, code_phase_samp, offset_chips=0.0):
+    """Multiply `x` by the satellite's code, aligned at `code_phase_samp` (samples)
+    plus `offset_chips`. Aligned, every +/-1 chip of the satellite's code meets the
+    same chip in the replica and the code vanishes: what is left of the satellite is
+    its carrier, a pure tone at its Doppler, now visible in a spectrum. Misaligned
+    by a chip or more, the codes don't match and the signal stays spread."""
+    spms = int(round(fs * 1e-3))
+    shift = int(round(code_phase_samp + offset_chips * spms / CODE_LENGTH))
+    code = np.roll(upsample_code(prn, spms).astype(np.float32), shift)
+    reps = -(-len(x) // spms)                                   # ceil
+    return x[:len(x)] * np.tile(code, reps)[:len(x)]
+
+
 def noise_peak_over_mean(spms, n_dopplers, nms, trials=3, seed=0):
     """What peak/mean comes out with noise alone, for a grid of `n_dopplers` rows of
     `spms` code phases, each cell a sum of `nms` ms (simulated, median of `trials`).

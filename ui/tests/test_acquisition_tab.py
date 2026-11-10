@@ -223,3 +223,16 @@ def test_truth_overlay_for_a_synthetic_recording(tmp_path):
     assert [c["name"] for c in acq.handover_columns(truth)][-1] == "truth"
     assert acq.handover_columns(None) == acq.HANDOVER_COLUMNS
     assert len(acq.bars_figure(results, 5.0, 3)["data"]) == 1        # real recording: no stars
+
+
+def test_despreading_reveals_the_tone_only_when_aligned():
+    x = synthetic_gps(0.011, cn0_dbhz=45.0)
+    sp = acq.despread_spectra(x, FS, PRN, CODE_PHASE_SAMP)
+    i = int(np.argmax(sp["despread"]))
+    assert abs(sp["freqs"][i] - DOPPLER) <= 100                 # one 100 Hz bin
+    assert sp["despread"][i] > 20                              # C/N0 x T = 45 - 20 dB
+    assert sp["raw"].max() < 12                                # before: just noise peaks
+    off = acq.despread_spectra(x, FS, PRN, CODE_PHASE_SAMP, offset_chips=1.0)
+    assert off["despread"].max() < 12
+    fig = acq.despread_figure(sp, f"PRN {PRN}")
+    assert len(fig["data"]) == 2 and "+1500 Hz" in fig["layout"]["annotations"][0]["text"]

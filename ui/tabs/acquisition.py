@@ -15,12 +15,17 @@ from state import IQSource, state  # first: puts the repo root on sys.path
 import bassanite.acquisition as backend  # noqa: E402,I001
 from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
                                    DEFAULT_MS, DEFAULT_THRESHOLD, acquire_prn, cn0_from_peak,
-                                   FINE_MS, correlation_surface, read_results,
+                                   FINE_MS, correlation_surface, despread, read_results,
                                    refine_doppler, scan, scan_seconds, seconds_needed,
                                    write_results)
 from bassanite.provenance import read_meta, write_meta  # noqa: E402
 from bassanite.results import scan_csv  # noqa: E402
-from bassanite.synthetic import read_truth  # noqa: E402
+from bassanite.synthetic import CODE_PHASE_SAMP as SYN_CODE_PHASE  # noqa: E402
+from bassanite.synthetic import DOPPLER as SYN_DOPPLER  # noqa: E402
+from bassanite.synthetic import FS as SYN_FS  # noqa: E402
+from bassanite.synthetic import PRN as SYN_PRN  # noqa: E402
+from bassanite.synthetic import read_truth, synthetic_gps  # noqa: E402
+from common.signal_view import psd  # noqa: E402
 from common.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,  # noqa: E402
                             REGISTER_STAGES, ca_code, register_states)
 from common.iq_loader import load_iq  # noqa: E402
@@ -35,6 +40,8 @@ CHIPS_SHOWN = 100          # chips drawn in the "Meet the codes" waveform
 PERSISTENCE_POINTS = 5     # times at which the persistence check rescans
 PERSISTENCE_CONTRAST = 2   # undetected PRNs rescanned too, to show what noise does
 LABEL_BG = "rgba(255,255,255,0.85)"   # behind plot labels that may overlap bars
+DESPREAD_MS = 10           # signal the despreading demo transforms (100 Hz bins)
+DESPREAD_SPAN_HZ = 10000.0  # frequencies shown either side of the tuned frequency
 
 
 def samples_per_ms(fs: float) -> int:
@@ -188,6 +195,49 @@ def highest_noise(row: np.ndarray, code_phase: int, guard: int) -> float:
 def try_row(x, fs, prn, doppler, nms) -> np.ndarray:
     """Correlation power at one Doppler, summed over nms ms, for every code phase."""
     return correlation_surface(x, fs, prn, [doppler], nms)[0]
+
+
+# --- despreading: the moment GPS appears ----------------------------------------------------
+
+@lru_cache(maxsize=1)
+def _demo_signal() -> np.ndarray:
+    """A synthetic satellite for the despreading demo, before any scan."""
+    return synthetic_gps(DESPREAD_MS * 1e-3 + 0.001, cn0_dbhz=45.0)
+
+
+def despread_spectra(x, fs, prn, code_phase_samp, offset_chips=0.0,
+                     span_hz=DESPREAD_SPAN_HZ) -> dict:
+    """Spectra of DESPREAD_MS of signal before and after multiplying by the code.
+
+    One FFT over the whole stretch (bins of 1 / DESPREAD_MS = 100 Hz), each
+    spectrum in dB above its own median, i.e. above the noise level."""
+    n = min(len(x), int(round(fs * DESPREAD_MS * 1e-3)))
+    x = np.asarray(x[:n])
+    freqs, raw = psd(x, fs, n)
+    _, des = psd(despread(x, fs, prn, code_phase_samp, offset_chips), fs, n)
+    keep = np.abs(freqs) <= span_hz
+    raw, des = raw[keep], des[keep]
+    return {"freqs": freqs[keep], "raw": raw - np.median(raw), "despread": des - np.median(des)}
+
+
+def despread_figure(sp: dict, label: str, misaligned: bool = False) -> dict:
+    i = int(np.argmax(sp["despread"]))
+    f_peak, h_peak = float(sp["freqs"][i]), float(sp["despread"][i])
+    return figure(
+        [{"type": "scatter", "mode": "lines", "name": "recorded samples",
+          "x": np.round(sp["freqs"], 1).tolist(), "y": np.round(sp["raw"], 2).tolist(),
+          "line": {"color": NOISE, "width": 1}},
+         {"type": "scatter", "mode": "lines", "name": f"× code of {label}",
+          "x": np.round(sp["freqs"], 1).tolist(), "y": np.round(sp["despread"], 2).tolist(),
+          "line": {"color": "#1565c0", "width": 1.5}}],
+        height=320, legend={"orientation": "h", "y": 1.12},
+        annotations=[{"x": f_peak, "y": h_peak,
+                      "text": (f"highest noise bin: +{h_peak:.0f} dB" if misaligned
+                               else f"{f_peak:+.0f} Hz, +{h_peak:.0f} dB"),
+                      "showarrow": True, "arrowhead": 2, "ax": 40, "ay": -25,
+                      "bgcolor": LABEL_BG}],
+        xaxis={"title": "Frequency offset from 1575.42 MHz (Hz)"},
+        yaxis={"title": "Power above the noise (dB)"})
 
 
 # --- persistence --------------------------------------------------------------------------------
@@ -595,6 +645,7 @@ class AcquisitionTab:
 
     def build(self) -> None:
         self._build_codes()
+        self._build_despread()
         with ui.row().classes("w-full items-start gap-4"):
             self._build_controls()
             with ui.column().classes("flex-1 min-w-[18rem] gap-4"):
@@ -651,6 +702,40 @@ class AcquisitionTab:
                 .classes("w-full")
             explain_panel("acquisition", "codes")
         self._show_lfsr()
+
+    def _build_despread(self) -> None:
+        with self._card("The moment GPS appears: multiply by the code",
+                        f"Step 1 ended on a flat spectrum: the satellites are spread over "
+                        f"2 MHz, below the noise. Here are {DESPREAD_MS} ms of the recording "
+                        "again, before (grey) and after (blue) multiplying by one satellite's "
+                        "code, lined up where the scan found it."):
+            with ui.row().classes("items-center gap-6"):
+                self.despread_off = ui.switch("Misalign the code by 1 chip",
+                                              on_change=lambda: self._show_despread())
+                self.despread_label = ui.label().classes("text-sm")
+            self.despread_plot = ui.plotly(empty_figure()).classes("w-full")
+            explain_panel("acquisition", "despread")
+        self._show_despread()            # the synthetic satellite until a scan is shown
+
+    def _show_despread(self) -> None:
+        v, src = self.view, state.source
+        detected = v is not None and self.results is not None and \
+            v.prn in detected_prns(self.results) and self.x is not None
+        if detected:
+            x, fs, prn, cp = self.x, src.fs, v.prn, v.code_phase_samp
+            label, note = f"PRN {prn}", (f"PRN {prn}, found by the scan at "
+                                         f"{v.fine_doppler_hz:+.0f} Hz.")
+        else:
+            x, fs, prn, cp = _demo_signal(), SYN_FS, SYN_PRN, SYN_CODE_PHASE
+            label, note = f"PRN {prn}", ("No detected satellite selected yet, so this is a "
+                                         f"synthetic one: PRN {SYN_PRN} at "
+                                         f"{SYN_DOPPLER:+.0f} Hz, 45 dB-Hz.")
+        off = 1.0 if self.despread_off.value else 0.0
+        sp = despread_spectra(x, fs, prn, cp, off)
+        self.despread_plot.update_figure(despread_figure(sp, label, misaligned=bool(off)))
+        self.despread_label.set_text(
+            note + (" Misaligned: the codes no longer match, and the tone is gone."
+                    if off else ""))
 
     def _build_controls(self) -> None:
         with ui.card().classes("w-full md:w-72").props("flat bordered") \
@@ -996,6 +1081,7 @@ class AcquisitionTab:
         self._try_points = []
         self._try_ref = None
         self._show_try()
+        self._show_despread()
 
     def _show_surface(self) -> None:
         if self.view is not None:
