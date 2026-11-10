@@ -16,8 +16,9 @@ larger the ratio between the two.
 
 **|Q| / |I|** (purple) is the lock indicator. When the carrier is locked, the energy
 is on I and Q is just noise, so the ratio is small. Below 0.3 (dashed line) counts
-as locked. A satellite whose ratio stays near 1 (PRN 7 in `capture.bin`) never
-locked: its energy is spread around the circle.
+as locked. A satellite whose ratio stays near 1 never locked: its energy is spread
+around the circle. PRN 7 in `capture.bin` did that until the tracking started from a
+better Doppler estimate; now it locks at about 37 dB-Hz.
 
 ## Math
 

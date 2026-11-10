@@ -57,8 +57,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
-                                   DEFAULT_MS, DEFAULT_THRESHOLD, scan,
-                                   seconds_needed, write_results)
+                                   DEFAULT_MS, DEFAULT_THRESHOLD, persistence, scan,
+                                   scan_seconds, write_results)
 from bassanite.provenance import write_meta                    # noqa: E402
 from bassanite.results import scan_csv                         # noqa: E402
 from common.iq_loader import load_iq                           # noqa: E402
@@ -140,6 +140,12 @@ def main():
                          "results/<recording>/acquisition/scan_results.csv)")
     ap.add_argument("--plot", default=None,
                     help="where to write the plot (default: next to the CSV)")
+    ap.add_argument("--persistence", action="store_true",
+                    help="after the scan, rescan at several moments across the "
+                         "recording and check each detection drifts like a real "
+                         "satellite (the confirmation for weak detections)")
+    ap.add_argument("--points", type=int, default=5,
+                    help="moments the persistence check rescans at (default 5)")
     a = ap.parse_args()
     if a.csv is None:
         a.csv = str(scan_csv(a.iq))
@@ -148,7 +154,7 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(a.csv)), exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(a.plot)), exist_ok=True)
 
-    load_secs = seconds_needed(a.ms)              # just enough + small margin
+    load_secs = scan_seconds(a.ms)        # the search, or 40 ms for the refinement
     x = load_iq(a.iq, a.format, a.fs, seconds=load_secs,
                 skip_seconds=a.skip_seconds)
     rms = float(np.sqrt(np.mean(np.abs(x) ** 2))) if x.size else 0.0
@@ -165,6 +171,41 @@ def main():
                {"dop_range_hz": a.dop_range, "dop_step_hz": a.dop_step, "ms": a.ms,
                 "skip_seconds": a.skip_seconds, "threshold": a.threshold})
     write_plot(results, a.threshold, a.plot)
+
+    if a.persistence:
+        detected = [r["prn"] for r in results if r["detected"]]
+        contrast = [r["prn"] for r in results if not r["detected"]][:PERSISTENCE_CONTRAST]
+        print(f"\npersistence check: rescanning {len(detected)} detected PRN(s) and "
+              f"{len(contrast)} undetected for contrast at {a.points} moments...")
+        p = persistence(a.iq, a.format, a.fs,
+                        (-a.dop_range, a.dop_range, a.dop_step, a.ms),
+                        detected + contrast, detected, a.points)
+        print_persistence(p, detected)
+
+
+PERSISTENCE_CONTRAST = 2      # strongest undetected PRNs rescanned too
+
+
+def print_persistence(p, detected):
+    times = p["times"]
+    print()
+    print(f"{'PRN':>3}  " + "  ".join(f"{t:>6.1f}s Doppler/chips/ratio".rjust(28)
+                                     for t in times))
+    for prn, tr in p["tracks"].items():
+        cells = [f"{d:>+7.0f} {c:>7.1f} {r:>5.1f}".rjust(28)
+                 for d, c, r in zip(tr["doppler"], tr["chips"], tr["ratio"])]
+        print(f"{prn:>3}  " + "  ".join(cells) + ("" if prn in detected else "  (undetected)"))
+    print()
+    print(f"code drift, measured vs predicted from the Doppler "
+          f"(tolerance {p['tolerance']:.2f} chips/s):")
+    for prn in detected:
+        d = p["drift"].get(prn)
+        if d is None:
+            continue
+        ok = abs(d["measured"] - d["predicted"]) <= p["tolerance"]
+        print(f"  PRN {prn:>2}: Doppler {d['doppler']:>+7.0f} Hz  measured "
+              f"{d['measured']:>+7.3f}  predicted {d['predicted']:>+7.3f} chips/s  "
+              f"{'OK: drifts like a real satellite' if ok else 'MISMATCH: suspect'}")
 
 
 if __name__ == "__main__":

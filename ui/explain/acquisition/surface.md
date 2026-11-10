@@ -1,6 +1,6 @@
 ---
 title: Reading the search grid
-code: bassanite/acquisition.py::correlation_surface, ui/tabs/acquisition.py::refine_doppler
+code: bassanite/acquisition.py::correlation_surface, bassanite/acquisition.py::refine_doppler
 ---
 ## Intuition
 

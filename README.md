@@ -88,10 +88,12 @@ load, so you can edit them and refresh the browser.
 
 Stages 02 and 03 are working. Stage 02 acquisition finds **6+ genuine GPS
 satellites** in a 30 s outdoor capture (PRN 20, 5, 22, 21, 30, 14 strong; 7 and 15
-moderate), each verified by persistence. Stage 03 then **locks 7 of those
+moderate), each verified by persistence. Stage 03 then **locks all 8 of those
 satellites for the full 30 s** at a healthy **37–43 dB-Hz C/N0** (carrier PLL +
 carrier-aided code DLL), demodulates the 50 bps data, and — the decisive check —
-recovers the GPS subframe **preamble repeating every 300 bits** on all 7. That
+recovers the GPS subframe **preamble repeating every 300 bits** on all 8. (PRN 7, the
+weakest, locks since 2026-11-10, when acquisition started handing tracking a refined
+Doppler.) That
 confirms signal presence and strength are **not** a blocker, and the nav data is
 cleanly decodable. The path to a fix now continues with stage 04 (frame sync +
 ephemeris decode) → stage 05 (PVT). See

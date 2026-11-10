@@ -5,9 +5,8 @@ code: bassanite/tracking.py::calc_loop_coef
 ## Intuition
 
 **Doppler** (left) is the carrier frequency the carrier loop settled on. It moves
-slowly as the satellite's speed along our line of sight changes: by 5 to 18 Hz over
-the 30 s of `capture.bin` for the locked satellites. The jitter on top is noise the
-loop lets through. (Unlocked PRN 7 wanders by almost 100 Hz.)
+slowly as the satellite's speed along our line of sight changes: by 3 to 18 Hz over
+the 30 s of `capture.bin`. The jitter on top is noise the loop lets through.
 
 **Code drift** (right) is how far the start of the code has slid since the first
 millisecond, in chips. It slides steadily, at the rate the Doppler sets: the same

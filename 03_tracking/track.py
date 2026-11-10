@@ -200,7 +200,8 @@ def main():
             report(0, total_ms)
         tr = track_prn(x, a.fs, prn, s["code_phase_samp"], s["doppler_hz"],
                        pll_bw=a.pll_bw, dll_bw=a.dll_bw, max_ms=max_ms, detail=True,
-                       progress=report if a.progress else None)
+                       progress=report if a.progress else None,
+                       refine=not s.get("refined", False))
         r = summarize(tr)
         if r is None:
             print(f"  PRN {prn:>2}: too few epochs ({len(tr['i_prompt'])}), skipped")

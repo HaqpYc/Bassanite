@@ -12,10 +12,12 @@ from nicegui import run, ui
 
 from state import IQSource, state  # first: puts the repo root on sys.path
 
-from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402,I001
+import bassanite.acquisition as backend  # noqa: E402,I001
+from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
                                    DEFAULT_MS, DEFAULT_THRESHOLD, acquire_prn, cn0_from_peak,
-                                   code_drift_chips_per_s, correlation_surface,
-                                   read_results, scan, seconds_needed, write_results)
+                                   FINE_MS, correlation_surface, read_results,
+                                   refine_doppler, scan, scan_seconds, seconds_needed,
+                                   write_results)
 from bassanite.provenance import read_meta, write_meta  # noqa: E402
 from bassanite.results import scan_csv  # noqa: E402
 from common.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,  # noqa: E402
@@ -67,12 +69,13 @@ DEFAULT_SETTINGS = ScanSettings()
 
 def window_start(src: IQSource, skip_s: float, ms: int) -> float:
     """`skip_s`, moved back if needed so `ms` of signal fit in the recording."""
-    return min(max(skip_s, 0.0), max(src.duration_s - seconds_needed(ms), 0.0))
+    return backend.window_start(src.duration_s, skip_s, ms)
 
 
 def load_window(src: IQSource, skip_s: float, ms: int, extra_ms: int = 0) -> np.ndarray:
-    """The samples a scan integrating `ms` reads, plus `extra_ms` more if available."""
-    x = load_iq(src.path, src.fmt, src.fs, seconds=seconds_needed(ms + extra_ms),
+    """The samples a scan integrating `ms` reads (at least FINE_MS, for the Doppler
+    refinement), plus `extra_ms` more if available."""
+    x = load_iq(src.path, src.fmt, src.fs, seconds=scan_seconds(ms + extra_ms),
                 skip_seconds=window_start(src, skip_s, ms))
     if len(x) < ms * samples_per_ms(src.fs):
         raise ValueError(f"The recording is too short: integrating {ms} ms needs "
@@ -130,15 +133,6 @@ def max_pool(a: np.ndarray, columns: int) -> tuple[np.ndarray, int]:
     return a.reshape(a.shape[:-1] + (-1, k)).max(axis=-1), k
 
 
-def refine_doppler(x, fs, prn, doppler, code_phase, nms, span_hz, step_hz=10.0) -> float:
-    """A finer Doppler estimate than the search grid: within +/-span_hz of
-    `doppler`, the frequency where the correlation at `code_phase` is strongest."""
-    dops = np.arange(doppler - span_hz, doppler + span_hz + step_hz / 2, step_hz)
-    surf = correlation_surface(x, fs, prn, dops, nms)
-    cols = (code_phase + np.arange(-1, 2)) % surf.shape[1]
-    return float(dops[surf[:, cols].max(axis=1).argmax()])
-
-
 @dataclass
 class PrnView:
     """Everything the tab shows about one PRN."""
@@ -163,7 +157,7 @@ def prn_view(x: np.ndarray, fs: float, prn: int, s: ScanSettings) -> PrnView:
     pooled, k = max_pool(surface / scale, SURFACE_COLUMNS)
     centres = np.minimum(np.arange(pooled.shape[1]) * k + (k - 1) / 2, spms - 1)
     return PrnView(prn, cp, dop, ratio,
-                   refine_doppler(x, fs, prn, dop, cp, s.ms, s.dop_step_hz),
+                   refine_doppler(x, fs, prn, dop, cp, FINE_MS, s.dop_step_hz),
                    dopplers, pooled, centres * CODE_LENGTH / spms,
                    surface[i] / surface[i].mean(), surface[:, cp] / scale)
 
@@ -199,51 +193,9 @@ def try_row(x, fs, prn, doppler, nms) -> np.ndarray:
 
 def persistence(src: IQSource, s: ScanSettings, prns: list[int], detected: list[int],
                 points: int = PERSISTENCE_POINTS, progress=None) -> dict:
-    """Re-acquire `prns` at `points` times spread over the recording.
-
-    Code phases are measured from the start of the recording (not of each
-    window), so they line up even when a window starts mid-millisecond. For the
-    detected PRNs, the code drift is fitted and compared with the drift their
-    Doppler predicts.
-    """
-    last = max(src.duration_s - seconds_needed(s.ms), 0.0)
-    times = np.unique(np.round(np.linspace(0.0, last, points), 3))
-    tracks = {prn: {"doppler": [], "chips": [], "ratio": []} for prn in prns}
-    total, done = len(times) * len(prns), 0
-    ms_samples = src.fs * 1e-3
-    for t in times:
-        start = window_start(src, float(t), s.ms)
-        x = load_window(src, start, s.ms)
-        first = int(round(start * src.fs))
-        for prn in prns:
-            cp, dop, ratio = acquire_prn(x, src.fs, prn, *s.search())
-            if prn in detected:
-                dop = refine_doppler(x, src.fs, prn, dop, cp, s.ms, s.dop_step_hz)
-            chips = ((first + cp) / ms_samples % 1.0) * CODE_LENGTH
-            tracks[prn]["doppler"].append(dop)
-            tracks[prn]["chips"].append(chips)
-            tracks[prn]["ratio"].append(ratio)
-            done += 1
-            if progress is not None:
-                progress(done, total)
-    drift = {}
-    for prn in detected:
-        if prn not in tracks or len(times) < 2:
-            continue
-        chips = np.unwrap(np.array(tracks[prn]["chips"]), period=CODE_LENGTH)
-        drift[prn] = {"measured": float(np.polyfit(times, chips, 1)[0]),
-                      "predicted": float(code_drift_chips_per_s(
-                          np.mean(tracks[prn]["doppler"]))),
-                      "doppler": float(np.mean(tracks[prn]["doppler"]))}
-    return {"times": times, "tracks": tracks, "drift": drift,
-            "tolerance": drift_tolerance(times)}
-
-
-def drift_tolerance(times: np.ndarray) -> float:
-    """How far measured and predicted drift may differ (chips/s): code phases are
-    measured to one sample (~0.26 chip at 4 MSPS), so short spans fit loosely."""
-    span = float(times[-1] - times[0]) if len(times) > 1 else 0.0
-    return max(0.1, 0.5 / span) if span > 0 else float("inf")
+    """The persistence check (bassanite/acquisition.py) on the loaded recording."""
+    return backend.persistence(src.path, src.fmt, src.fs, s.search(), prns, detected,
+                               points, progress)
 
 
 # --- meet the codes -----------------------------------------------------------------------------
@@ -562,6 +514,7 @@ def persistence_figures(p: dict, detected: list[int]) -> tuple[dict, dict]:
 HANDOVER_COLUMNS = [
     {"name": "prn", "label": "PRN", "field": "prn", "align": "left"},
     {"name": "doppler", "label": "Doppler (Hz)", "field": "doppler"},
+    {"name": "fine", "label": "Refined Doppler (Hz)", "field": "fine"},
     {"name": "chips", "label": "Code phase (chips)", "field": "chips"},
     {"name": "samples", "label": "Code phase (samples)", "field": "samples"},
     {"name": "ratio", "label": "peak / mean", "field": "ratio"},
@@ -571,6 +524,8 @@ HANDOVER_COLUMNS = [
 
 def handover_rows(results: list[dict]) -> list[dict]:
     return [{"prn": r["prn"], "doppler": f"{r['doppler_hz']:+.0f}",
+             "fine": ("" if r.get("fine_doppler_hz") is None
+                      else f"{r['fine_doppler_hz']:+.0f}"),
              "chips": f"{r['code_phase_chips']:.1f}", "samples": r["code_phase_samp"],
              "ratio": f"{r['peak_over_mean']:.1f}", "detected": "✅" if r["detected"] else ""}
             for r in results]

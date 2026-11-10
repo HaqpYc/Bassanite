@@ -107,6 +107,7 @@ class Track:
     seed_doppler: float
     seed_code_phase: float
     detail: dict | None = None        # Early/Late and discriminators, if saved
+    coarse_doppler: float | None = None   # acquisition's search-grid Doppler
 
     @property
     def n_ms(self) -> int:
@@ -126,7 +127,8 @@ def load_track(path: Path, t0: float) -> Track:
         _track_cache[key] = Track(
             d["prn"], d["fs"], t0, d["i_prompt"], d["q_prompt"], d["doppler_hz"],
             d["code_phase_samp"], d["nav_bits"], d["cn0_dbhz"], d["bit_offset"],
-            d["doppler_seed_hz"], d["code_phase_samp_seed"], d["detail"])
+            d["doppler_seed_hz"], d["code_phase_samp_seed"], d["detail"],
+            d["doppler_coarse_hz"])
     return _track_cache[key]
 
 
@@ -1110,8 +1112,11 @@ class TrackingTab:
                 self._try_x = await run.io_bound(load_iq, src.path, src.fmt, src.fs,
                                                  TRY_SECONDS, tr.t0)
                 self._try_key = key
+            # From the coarse search bin, with the pull-in search: the problem a
+            # loop faces when nothing refined its starting frequency.
             r = await run.io_bound(try_pll, self._try_x, src.fs, tr.prn,
-                                   tr.seed_code_phase, tr.seed_doppler, bw)
+                                   tr.seed_code_phase, tr.coarse_doppler or tr.seed_doppler,
+                                   bw)
         except (OSError, ValueError) as err:
             self.try_verdict.set_text(f"Could not track: {err}")
             return

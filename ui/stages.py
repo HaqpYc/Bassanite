@@ -36,8 +36,8 @@ STAGES: tuple[Stage, ...] = (
           "IQ samples: complex numbers at 4 million per second, scaled to about ±1, "
           "DC offset removed (common/iq_loader.py)."),
     Stage("acquisition", 2, "Find satellites", "Which satellites are overhead?", True,
-          "For each satellite found: its PRN, code phase and Doppler, the starting "
-          "point for tracking.",
+          "For each satellite found: its PRN, code phase and Doppler (refined to about "
+          "20 Hz), the starting point for tracking.",
           ("acquisition/scan_results.csv",)),
     Stage("tracking", 3, "Track", "Follow each one → data bits", True,
           "For each locked satellite: the 1 kHz prompt correlator, Doppler and code "

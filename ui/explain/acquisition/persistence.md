@@ -1,6 +1,6 @@
 ---
 title: Real satellites drift smoothly
-code: ui/tabs/acquisition.py::persistence, bassanite/acquisition.py::code_drift_chips_per_s
+code: bassanite/acquisition.py::persistence, bassanite/acquisition.py::code_drift_chips_per_s
 ---
 ## Intuition
 

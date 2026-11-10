@@ -13,7 +13,7 @@ somewhat above their average: about **3** with 10 ms of signal (the dotted line)
 The threshold of 5 leaves a margin above that. A bar only just above it, like PRN 7
 in `capture.bin` (5.4), is a candidate rather than a certainty, and the persistence
 check decides. PRN 7 passes it (same Doppler all along, code drifting exactly as its
-Doppler predicts), so it is a real satellite, but too weak for tracking to lock.
+Doppler predicts), so it is a real satellite, and tracking locks it.
 
 The height of a bar also tells how strong the satellite is. Roughly, peak/mean − 1 is
 the satellite's signal-to-noise ratio after 1 ms, so it gives a first estimate of

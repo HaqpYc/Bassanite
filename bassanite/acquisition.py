@@ -22,17 +22,24 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.ca_code import CHIP_RATE, CODE_LENGTH, upsample_code  # noqa: E402
+from common.iq_loader import load_iq, open_iq  # noqa: E402
 
 DEFAULT_DOP_RANGE_HZ = 10000.0
 DEFAULT_DOP_STEP_HZ = 250.0
 DEFAULT_MS = 10
 DEFAULT_THRESHOLD = 5.0
+FINE_STEP_HZ = 10.0       # grid of the refined Doppler handed to tracking
+# Signal the refinement sums over. Measured on capture.bin against the locked loops'
+# Doppler: 10 ms misses by up to 74 Hz on a weak satellite (PRN 15, peak/mean 6.3),
+# 40 ms by at most 29 Hz, which a 12 Hz carrier loop pulls in at once.
+FINE_MS = 40
 L1_HZ = 1575.42e6
 
 # scan_results.csv, the file stage 03 reads its seeds from, and its columns.
 SCAN_CSV = "scan_results.csv"
-CSV_FIELDS = ("prn", "doppler_hz", "code_phase_samp", "code_phase_chips",
-              "peak_over_mean", "detected")
+# fine_doppler_hz is empty for undetected PRNs (and absent from older files).
+CSV_FIELDS = ("prn", "doppler_hz", "fine_doppler_hz", "code_phase_samp",
+              "code_phase_chips", "peak_over_mean", "detected")
 
 
 def correlation_surface(x, fs, prn, dopplers, nms):
@@ -80,24 +87,41 @@ def acquire_prn(x, fs, prn, dop_min, dop_max, dop_step, nms, return_surface=Fals
     return (*best, dopplers, surface) if return_surface else best
 
 
+def refine_doppler(x, fs, prn, doppler, code_phase, nms, span_hz, step_hz=FINE_STEP_HZ):
+    """A finer Doppler estimate than the search grid: within +/-span_hz of
+    `doppler`, the frequency where the correlation at `code_phase` (samples, +/-1)
+    is strongest, summed non-coherently over `nms` ms (so data bit flips do not
+    matter). Acquisition hands this to tracking: a narrow carrier loop cannot pull
+    in the error of up to half a search bin on its own."""
+    dops = np.arange(doppler - span_hz, doppler + span_hz + step_hz / 2, step_hz)
+    surf = correlation_surface(x, fs, prn, dops, min(nms, len(x) // int(round(fs * 1e-3))))
+    cols = (int(round(code_phase)) + np.arange(-1, 2)) % surf.shape[1]
+    return float(dops[surf[:, cols].max(axis=1).argmax()])
+
+
 def scan(x, fs, dop_min, dop_max, dop_step, nms, threshold, prns=range(1, 33),
          progress=None):
     """Acquire every PRN in `prns`. Returns one dict per PRN, strongest first.
 
-    `progress(done, total)` is called after each PRN, if given.
+    Detected PRNs also get `fine_doppler_hz` (refine_doppler within one search
+    step, over FINE_MS of `x` if it is that long: see scan_seconds); undetected
+    ones get None. `progress(done, total)` is called after each PRN, if given.
     """
     spms = int(round(fs * 1e-3))
     prns = list(prns)
     results = []
     for n, prn in enumerate(prns, start=1):
         cp, dop, ratio = acquire_prn(x, fs, prn, dop_min, dop_max, dop_step, nms)
+        detected = ratio >= threshold
         results.append({
             "prn": prn,
             "doppler_hz": dop,
+            "fine_doppler_hz": (refine_doppler(x, fs, prn, dop, cp, FINE_MS, dop_step)
+                                if detected else None),
             "code_phase_samp": cp,
             "code_phase_chips": cp * float(CODE_LENGTH) / spms,
             "peak_over_mean": ratio,
-            "detected": ratio >= threshold,
+            "detected": detected,
         })
         if progress is not None:
             progress(n, len(prns))
@@ -108,6 +132,12 @@ def scan(x, fs, dop_min, dop_max, dop_step, nms, threshold, prns=range(1, 33),
 def seconds_needed(nms):
     """How many seconds of signal a scan integrating `nms` ms reads (+5 ms margin)."""
     return (nms + 5) / 1000.0
+
+
+def scan_seconds(nms):
+    """How much signal to load for `scan`: the search's `nms` ms, or FINE_MS for the
+    Doppler refinement if that is longer."""
+    return seconds_needed(max(nms, FINE_MS))
 
 
 def code_drift_chips_per_s(doppler_hz):
@@ -132,6 +162,69 @@ def cn0_from_peak(peak_over_mean, coherent_s=1e-3):
     return 10 * np.log10(max(peak_over_mean - 1.0, 1e-12) / coherent_s)
 
 
+# --- persistence: is a detection real? ------------------------------------------------
+
+def window_start(duration_s, skip_s, nms):
+    """`skip_s`, moved back if needed so a scan integrating `nms` ms fits in a
+    recording of `duration_s` seconds."""
+    return min(max(skip_s, 0.0), max(duration_s - seconds_needed(nms), 0.0))
+
+
+def drift_tolerance(times):
+    """How far measured and predicted drift may differ (chips/s): code phases are
+    measured to one sample (~0.26 chip at 4 MSPS), so short spans fit loosely."""
+    span = float(times[-1] - times[0]) if len(times) > 1 else 0.0
+    return max(0.1, 0.5 / span) if span > 0 else float("inf")
+
+
+def persistence(iq_path, fmt, fs, search, prns, detected, points=5, progress=None):
+    """Re-acquire `prns` at `points` times spread over the recording.
+
+    `search` is (dop_min, dop_max, dop_step, nms), as for acquire_prn. A real
+    satellite comes back every time, with a code phase drifting at the rate its
+    Doppler predicts (code_drift_chips_per_s); a noise peak lands somewhere new
+    each time. Code phases are measured from the start of the recording (not of
+    each window), so they line up even when a window starts mid-millisecond. For
+    the `detected` PRNs the Doppler is refined and the code drift fitted.
+
+    Returns {"times", "tracks": {prn: {"doppler", "chips", "ratio"}},
+    "drift": {prn: {"measured", "predicted", "doppler"}}, "tolerance"}.
+    """
+    dop_min, dop_max, dop_step, nms = search
+    duration = len(open_iq(iq_path, fmt, fs, remove_dc=False)) / fs
+    last = max(duration - seconds_needed(nms), 0.0)
+    times = np.unique(np.round(np.linspace(0.0, last, points), 3))
+    tracks = {prn: {"doppler": [], "chips": [], "ratio": []} for prn in prns}
+    total, done = len(times) * len(prns), 0
+    ms_samples = fs * 1e-3
+    for t in times:
+        start = window_start(duration, float(t), nms)
+        x = load_iq(iq_path, fmt, fs, seconds=scan_seconds(nms), skip_seconds=start)
+        first = int(round(start * fs))
+        for prn in prns:
+            cp, dop, ratio = acquire_prn(x, fs, prn, dop_min, dop_max, dop_step, nms)
+            if prn in detected:
+                dop = refine_doppler(x, fs, prn, dop, cp, FINE_MS, dop_step)
+            chips = ((first + cp) / ms_samples % 1.0) * CODE_LENGTH
+            tracks[prn]["doppler"].append(dop)
+            tracks[prn]["chips"].append(chips)
+            tracks[prn]["ratio"].append(ratio)
+            done += 1
+            if progress is not None:
+                progress(done, total)
+    drift = {}
+    for prn in detected:
+        if prn not in tracks or len(times) < 2:
+            continue
+        chips = np.unwrap(np.array(tracks[prn]["chips"]), period=CODE_LENGTH)
+        drift[prn] = {"measured": float(np.polyfit(times, chips, 1)[0]),
+                      "predicted": float(code_drift_chips_per_s(
+                          np.mean(tracks[prn]["doppler"]))),
+                      "doppler": float(np.mean(tracks[prn]["doppler"]))}
+    return {"times": times, "tracks": tracks, "drift": drift,
+            "tolerance": drift_tolerance(times)}
+
+
 # --- scan_results.csv: the hand-over to stage 03 (written and read only here) ---
 
 def write_results(results, path):
@@ -139,7 +232,8 @@ def write_results(results, path):
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(CSV_FIELDS))
         w.writeheader()
-        w.writerows({k: r[k] for k in CSV_FIELDS} for r in results)
+        w.writerows({k: ("" if r.get(k) is None else r[k]) for k in CSV_FIELDS}
+                    for r in results)
 
 
 def read_results(path):
@@ -150,6 +244,8 @@ def read_results(path):
     with open(path, newline="") as f:
         return [{"prn": int(r["prn"]),
                  "doppler_hz": float(r["doppler_hz"]),
+                 "fine_doppler_hz": (float(r["fine_doppler_hz"])
+                                     if r.get("fine_doppler_hz") else None),
                  "code_phase_samp": int(float(r["code_phase_samp"])),
                  "code_phase_chips": float(r["code_phase_chips"]),
                  "peak_over_mean": float(r.get("peak_over_mean") or 0.0),

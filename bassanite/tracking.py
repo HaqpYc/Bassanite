@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bassanite.acquisition import read_results  # noqa: E402
+from bassanite.acquisition import read_results, refine_doppler  # noqa: E402
 from common.ca_code import CHIP_RATE, CODE_LENGTH, ca_code  # noqa: E402
 
 L1_HZ = 1575.42e6                 # GPS L1 carrier (for carrier-aiding the code loop)
@@ -31,6 +31,11 @@ PROMPT_RATE_HZ = 1000             # one prompt sample per 1 ms code period
 LOCK_QI_MAX = 0.3                 # |Q|/|I| below this = carrier phase-locked
 DEFAULT_PLL_BW = 12.0
 DEFAULT_DLL_BW = 1.0
+# Pull-in search before the loops close, when the seed Doppler is still the coarse
+# acquisition one: +/-200 Hz in 25 Hz steps leaves at most 12.5 Hz of error.
+PULL_IN_SPAN_HZ = 200.0
+PULL_IN_STEP_HZ = 25.0
+PULL_IN_MS = 40           # as acquisition.FINE_MS: 10 ms misses weak satellites
 PROGRESS_EVERY_MS = 1000          # how often track_prn reports progress
 # Shortest signal that holds subframes 1, 2 and 3 (orbit and clock) each complete at
 # least once, whatever the phase of the 30 s frame. A subframe is 300 bits (6 s). In
@@ -52,34 +57,6 @@ def calc_loop_coef(bw, zeta, k):
     tau1 = k / (wn * wn)
     tau2 = 2.0 * zeta / wn
     return tau1, tau2
-
-
-def fine_doppler(x, fs, ca, code_phase_samp, dop_center, span=200.0, step=25.0,
-                 nms=10):
-    """Refine the acquisition Doppler to within ~step/2 Hz before closing the loop.
-
-    Acquisition bins are coarse (250 Hz), so the residual carrier error can exceed a
-    narrow PLL's pull-in range. We correlate the prompt replica over the first few
-    ms at the seed code phase across a fine Doppler grid (non-coherent across ms, so
-    the 20 ms data flips don't matter) and return the best Doppler.
-    """
-    spms = int(round(fs * 1e-3))
-    n0 = int(code_phase_samp)
-    cph = np.arange(spms) * CHIP_RATE / fs
-    prompt = ca[(np.floor(cph).astype(int)) % CODE_LENGTH]
-    n = np.arange(spms)
-    best_dop, best_pow = float(dop_center), -1.0
-    for dop in np.arange(dop_center - span, dop_center + span + 1, step):
-        wipe = np.exp(-1j * 2 * np.pi * dop * n / fs)
-        acc = 0.0
-        for k in range(nms):
-            seg = x[n0 + k * spms:n0 + (k + 1) * spms]
-            if len(seg) < spms:
-                break
-            acc += abs((seg * wipe) @ prompt)
-        if acc > best_pow:
-            best_pow, best_dop = acc, float(dop)
-    return best_dop
 
 
 def costas_error(ip, qp):
@@ -107,7 +84,7 @@ def dll_error(ie, qe, il, ql):
 
 def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
               pll_bw=DEFAULT_PLL_BW, dll_bw=DEFAULT_DLL_BW, max_ms=None,
-              detail=False, progress=None):
+              detail=False, progress=None, refine=True):
     """Track one PRN with a Costas PLL + carrier-aided DLL.
 
     Runs one iteration per 1 ms code period. Returns a dict of per-ms arrays
@@ -121,6 +98,9 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     ----------
     code_phase_samp : float   acquisition code phase, in samples at this fs
     doppler_hz      : float   acquisition Doppler estimate (Hz)
+    refine          : bool    first sharpen doppler_hz with a pull-in search
+                              (acquisition.refine_doppler, +/-200 Hz in 25 Hz
+                              steps); False when it is already a refined Doppler
     pll_bw          : float   carrier (PLL) loop noise bandwidth (Hz)
     dll_bw          : float   code (DLL) loop noise bandwidth (Hz); 0 freezes the
                               code rate (carrier-aiding only)
@@ -142,8 +122,10 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     use_dll = dll_bw > 0.0
     tau1_d, tau2_d = calc_loop_coef(dll_bw, 0.7, 1.0) if use_dll else (1.0, 0.0)
 
-    # Sharpen the coarse acquisition Doppler so the PLL can pull in.
-    carr_freq_basis = fine_doppler(x, fs, ca, code_phase_samp, doppler_hz)
+    # Sharpen a coarse acquisition Doppler so the PLL can pull in.
+    carr_freq_basis = (refine_doppler(x, fs, prn, doppler_hz, code_phase_samp, PULL_IN_MS,
+                                      PULL_IN_SPAN_HZ, PULL_IN_STEP_HZ)
+                       if refine else float(doppler_hz))
     carr_f = carr_freq_basis              # current carrier-Doppler estimate (Hz)
     carr_phase = 0.0                      # carrier NCO phase carried across epochs
     carr_nco = 0.0; old_carr_err = 0.0    # PLL filter state
@@ -313,11 +295,18 @@ def summarize(track):
 def read_seeds(csv_path, fs, only_detected=True):
     """Read stage-02 acquisition results as tracking seeds.
 
-    Converts the sample-rate-independent `code_phase_chips` to samples at this fs.
-    Returns a list of dicts {prn, doppler_hz, code_phase_samp, peak_over_mean}.
+    Converts the sample-rate-independent `code_phase_chips` to samples at this fs,
+    and uses the refined Doppler when acquisition gives one. Returns a list of
+    dicts {prn, doppler_hz, refined, coarse_doppler_hz, code_phase_samp,
+    peak_over_mean}; `refined` tells track_prn it can skip its own pull-in
+    search, and coarse_doppler_hz is the search-grid Doppler.
     """
     spms = int(round(fs * 1e-3))
-    seeds = [{"prn": r["prn"], "doppler_hz": r["doppler_hz"],
+    seeds = [{"prn": r["prn"],
+              "doppler_hz": (r["doppler_hz"] if r["fine_doppler_hz"] is None
+                             else r["fine_doppler_hz"]),
+              "refined": r["fine_doppler_hz"] is not None,
+              "coarse_doppler_hz": r["doppler_hz"],
               "code_phase_samp": r["code_phase_chips"] * spms / CODE_LENGTH,
               "peak_over_mean": r["peak_over_mean"]}
              for r in read_results(csv_path) if r["detected"] or not only_detected]
@@ -358,6 +347,7 @@ def save_track(path, prn, fs, seed, track, result):
         bit_offset=result["bit_offset"],
         seconds_tracked=len(track["i_prompt"]) / PROMPT_RATE_HZ,
         doppler_seed_hz=seed["doppler_hz"],
+        doppler_coarse_hz=seed.get("coarse_doppler_hz", seed["doppler_hz"]),
         code_phase_samp_seed=seed["code_phase_samp"],
     )
     return path
@@ -366,14 +356,18 @@ def save_track(path, prn, fs, seed, track, result):
 def load_track(path):
     """Read a track_PRNnn.npz back. Returns a dict: the 1 kHz arrays (i_prompt,
     q_prompt, doppler_hz, code_phase_samp), nav_bits, cn0_dbhz, the scalars prn,
-    fs, bit_offset, doppler_seed_hz, code_phase_samp_seed, and `detail` (the
-    DETAIL_KEYS arrays, or None for files saved without them)."""
+    fs, bit_offset, doppler_seed_hz (where the carrier loop started),
+    doppler_coarse_hz (acquisition's search-grid Doppler), code_phase_samp_seed,
+    and `detail` (the DETAIL_KEYS arrays, or None for files saved without them)."""
     with np.load(path) as d:
         out = {k: d[k] for k in ("i_prompt", "q_prompt", "doppler_hz", "code_phase_samp",
                                  "nav_bits", "cn0_dbhz")}
         out.update(prn=int(d["prn"]), fs=float(d["fs"]), bit_offset=int(d["bit_offset"]),
                    doppler_seed_hz=float(d["doppler_seed_hz"]),
                    code_phase_samp_seed=float(d["code_phase_samp_seed"]))
+        out["doppler_coarse_hz"] = (float(d["doppler_coarse_hz"])
+                                    if "doppler_coarse_hz" in d.files
+                                    else out["doppler_seed_hz"])
         out["detail"] = ({k: d[k] for k in DETAIL_KEYS}
                          if all(k in d.files for k in DETAIL_KEYS) else None)
     return out

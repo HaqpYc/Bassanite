@@ -39,9 +39,18 @@ baseband: a real bipolar waveform (`Q_P ≈ 0` once locked) whose sign is the da
 
 ### 3. Fine-Doppler pull-in
 Acquisition bins are coarse (250 Hz), and a narrow PLL (≈12 Hz) cannot pull in a
-residual that large. Before closing the loop, `fine_doppler()` sweeps a fine grid
-(±200 Hz @ 25 Hz) at the seed code phase and picks the Doppler with the most prompt
-power — bringing the error inside the PLL's pull-in range.
+residual that large. So stage 02 hands over a **refined Doppler**:
+`refine_doppler()` (in `bassanite/acquisition.py`) sweeps ±250 Hz in 10 Hz steps at
+the detected code phase, summing the power of 40 one-millisecond correlations, and
+writes the result as `fine_doppler_hz` in `scan_results.csv`. Tracking starts its
+carrier loop there. Seeds without it (older CSVs, manual `--doppler`) get the same
+search, ±200 Hz in 25 Hz steps, inside `track_prn(refine=True)`.
+
+Why 40 ms: each correlation is coherent over only 1 ms, so a few tens of Hz cost
+almost nothing and noise moves the peak. Measured against the locked loops' Doppler on
+`capture.bin`, 10 ms missed by up to 74 Hz on a weak satellite (PRN 15) and 40 ms by
+at most 29 Hz. Until 2026-11-10 the search was a separate 10 ms version here; it
+started PRN 7 139 Hz off (−1975 Hz instead of −2114 Hz), and PRN 7 never locked.
 
 ### 4. Bit-edge sync → 50 bps
 Each nav bit spans exactly 20 ms (20 code periods). We don't know which of the 20
@@ -82,7 +91,7 @@ PRNs), `--pll-bw`/`--dll-bw`, `--seconds`/`--skip-seconds`, `--out-dir` (default
 web UI's **Track** tab, which runs this script as a separate process).
 
 The loops and helpers named on this page (`track_prn()`, `calc_loop_coef()`,
-`fine_doppler()`, `bit_sync()`, `estimate_cn0()`) live in
+`bit_sync()`, `estimate_cn0()`) live in
 [`../bassanite/tracking.py`](../bassanite/tracking.py); `track.py` is the command
 line. The two discriminators are their own small functions (`costas_error()`,
 `dll_error()`), and `bit_sync_scores()` gives the energy of all 20 bit-edge offsets.
@@ -120,9 +129,6 @@ and settings produced it.
 | `code_phase_samp` | 1 kHz | absolute (fractional) code-period start sample → pseudoranges in stage 05 |
 | `i_early`, `q_early`, `i_late`, `q_late` | 1 kHz | Early/Late correlators (±0.5 chip) |
 | `carr_err`, `code_err` | 1 kHz | Costas phase error (cycles) and DLL error (E−L)/(E+L) |
-
-The committed npz files predate the last two rows; re-run `track.py` (or press
-**Track the satellites** in the UI) to get them.
 | `nav_symbols`, `nav_bits` | 50 Hz | soft 20 ms sums and hard 0/1 bits |
 | `cn0_dbhz`, `lock_cos` | 50 Hz | C/N0 (NWPR) and carrier-lock cosine |
 | `prn`, `fs`, `bit_offset`, `ms_per_bit`, … | scalar | metadata |
@@ -131,20 +137,21 @@ The committed npz files predate the last two rows; re-run `track.py` (or press
 
 ## Result on `capture.bin` (30 s outdoor capture)
 
-Tracking the 8 PRNs stage 02 flagged: **7 lock solidly for the full 30 s.**
+Tracking the 8 PRNs stage 02 flagged: **all 8 lock solidly for the full 30 s.**
 
 | PRN | Doppler (Hz) | C/N0 (dB-Hz) | \|Q\|/\|I\| | preambles @300-bit | status |
 |----:|-------------:|-------------:|-----------:|:------------------:|:------:|
-| 20  |         2425 |         43.2 |       0.11 | 8 | LOCK |
-| 22  |         3578 |         41.8 |       0.12 | 8 | LOCK |
+| 20  |         2425 |         43.3 |       0.11 | 8 | LOCK |
+| 22  |         3578 |         41.8 |       0.13 | 8 | LOCK |
 | 30  |         −723 |         41.8 |       0.13 | 8 | LOCK |
 |  5  |          −96 |         42.3 |       0.12 | 8 | LOCK |
 | 14  |         2830 |         40.9 |       0.14 | 8 | LOCK |
 | 21  |        −1827 |         38.6 |       0.18 | 8 | LOCK |
 | 15  |         3897 |         36.6 |       0.23 | 8 | LOCK |
-|  7  |            — |          —   |       1.03 | 0 | no lock (weakest; acq peak/mean 5.4) |
+|  7  |        −2126 |         36.9 |       0.22 | 8 | LOCK (weakest; acq peak/mean 5.4) |
 
-C/N0 of **37–43 dB-Hz** on seven satellites is healthy — this **confirms the
+PRN 7 locks since the refined Doppler handover (section 3); before, it started 139 Hz
+off and never did. C/N0 of **37–43 dB-Hz** on eight satellites is healthy — this **confirms the
 README's revision**: `capture.bin` is *not* weak, and signal strength is not the
 blocker (the old `issues/clock_drift/` "≤1 SV / too weak" story is dead).
 
@@ -160,9 +167,10 @@ is flat while the **code phase drifts smoothly** (real orbital motion), C/N0 hol
 ## Verification — the data is decodable
 
 The test that noise cannot pass: the GPS subframe **preamble `10001011` (or its
-inverse) repeats every 300 bits (6 s)**. Checking the emitted `nav_bits`, **all 7
+inverse) repeats every 300 bits (6 s)**. Checking the emitted `nav_bits`, **all 8
 locked PRNs show the preamble paired at exactly 300-bit spacing** (≈5 subframes over
-30 s); the unlocked PRN 7 shows none. This independently reproduces the
+30 s), and all 8 pass the word parity check (IS-GPS-200) on all 48 words that the
+alignment check covers. (Before PRN 7 locked, it showed no preamble.) This independently reproduces the
 `issues/clock_drift/solution_clean_capture/mini_gps_rx.py` finding and hands stage 04
 a clean, frame-syncable bit stream.
 

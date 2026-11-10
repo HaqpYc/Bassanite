@@ -68,6 +68,10 @@ python 02_acquisition/scan_prns.py
 # other recording / format / search settings
 python 02_acquisition/scan_prns.py --iq path\to\file.dat --format complex64 \
     --fs 4e6 --dop-range 10000 --dop-step 250 --ms 10 --threshold 5.0
+
+# then confirm each detection: rescan at 5 moments and compare the code drift
+# with the drift its Doppler predicts (see "The drift must match the Doppler")
+python 02_acquisition/scan_prns.py --persistence
 ```
 Outputs: a table on stdout, `scan_results.csv` (+ `scan_results.meta.json`: which
 recording and settings produced it), and `scan_plot.png` (peak/mean per PRN with the
@@ -79,8 +83,14 @@ The search itself is in [`../bassanite/acquisition.py`](../bassanite/acquisition
 (`correlation_surface()`, `acquire_prn()`, `scan()`, `write_results()`/`read_results()`);
 `scan_prns.py` is its command line. `acquire_prn(..., return_surface=True)` also returns
 the full Doppler × code-phase correlation surface. The web UI's **Find satellites** tab
-runs the same scan (and writes the same two files), and adds the persistence check
-below as a button.
+runs the same scan (and writes the same two files), and has the persistence check
+below as a button; `--persistence` runs it on the command line
+(`persistence()` in the same module).
+
+Each detected PRN also gets a **refined Doppler** (`refine_doppler()`, `fine_doppler_hz`
+in the CSV): ±one search step in 10 Hz steps, over 40 ms. Tracking starts its carrier
+loop there (see `03_tracking/NOTES.md`, "Fine-Doppler pull-in"), so a scan reads 45 ms
+of signal even when the search itself integrates 10.
 
 ---
 
@@ -129,11 +139,12 @@ positions — this cannot be an artifact.
 ### The drift must match the Doppler
 Code and carrier are stretched by the same factor, so a satellite's code phase must
 slide at `−1.023 MHz · f_D / f_L1` chips/s (`code_drift_chips_per_s()`). The UI's
-persistence check rescans at 0, 7.5, 15, 22.5 and 30 s, refines each Doppler to 10 Hz,
-and fits the slide. On `capture.bin` all **8** detected PRNs agree with the prediction
-within 0.035 chips/s (e.g. PRN 20: measured −1.597, predicted −1.562 chips/s; PRN 15:
-−2.552 vs −2.553). That includes **PRN 7** (−2082 Hz, +1.354 vs +1.352): it is a real
-satellite, just too weak for stage 03 to lock. The two strongest undetected PRNs (10, 3)
+persistence check rescans at 0, 7.5, 15, 22.5 and 30 s, refines each Doppler (10 Hz
+steps, 40 ms), and fits the slide. On `capture.bin` all **8** detected PRNs agree with
+the prediction within 0.025 chips/s (e.g. PRN 20: measured −1.597, predicted −1.573
+chips/s; PRN 15: −2.552 vs −2.549). That includes **PRN 7** (−2102 Hz, +1.354 vs
++1.365): it is a real satellite, and stage 03 locks it (36.9 dB-Hz) since the refined
+Doppler handover. The two strongest undetected PRNs (10, 3)
 jump by thousands of Hz and hundreds of chips between windows.
 
 ### peak/mean is a rough C/N0
@@ -144,7 +155,7 @@ floor of ~3.2 is what a simulation of pure noise gives for 10 ms over 81 × 4000
 (13 for 1 ms, 2.4 for 20 ms).
 
 **Next stage:** [`../03_tracking/`](../03_tracking/) seeds its loops from
-`scan_results.csv` (this stage's output, in `results/capture/acquisition/`) and locks 7 of these PRNs for the full 30 s
+`scan_results.csv` (this stage's output, in `results/capture/acquisition/`) and locks all 8 of these PRNs for the full 30 s
 — the persistence claimed above, now confirmed by sustained carrier/code lock and a
 decodable 50 bps stream.
 

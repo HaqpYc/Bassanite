@@ -77,8 +77,34 @@ def test_scan_results_tolerate_other_columns(tmp_path):
     path.write_text("prn,doppler_hz,code_phase_samp,code_phase_chips,detected,extra\n"
                     "5,250.0,10,2.5575,true,x\n")
     assert acquisition.read_results(path) == [
-        {"prn": 5, "doppler_hz": 250.0, "code_phase_samp": 10, "code_phase_chips": 2.5575,
-         "peak_over_mean": 0.0, "detected": True}]
+        {"prn": 5, "doppler_hz": 250.0, "fine_doppler_hz": None, "code_phase_samp": 10,
+         "code_phase_chips": 2.5575, "peak_over_mean": 0.0, "detected": True}]
+    [seed] = tracking.read_seeds(path, FS)        # an older file: tracking must refine
+    assert seed["doppler_hz"] == 250.0 and not seed["refined"]
+
+
+def test_scan_hands_over_a_refined_doppler(tmp_path):
+    x = synthetic_gps(0.03, cn0_dbhz=50.0, sats=((PRN, CODE_PHASE_SAMP, DOPPLER + 90),))
+    results = acquisition.scan(x, FS, -2000, 2000, 250, 10, 5.0, prns=[PRN, 1])
+    found, other = results
+    assert found["doppler_hz"] == DOPPLER                  # nearest 250 Hz bin
+    # 1 ms coherent sums: a 20 Hz error costs ~0.1 % of the power, so +/-20 Hz is
+    # what the refinement can do (the PLL pulls in the rest).
+    assert abs(found["fine_doppler_hz"] - (DOPPLER + 90)) <= 20
+    assert other["fine_doppler_hz"] is None
+    path = tmp_path / acquisition.SCAN_CSV
+    acquisition.write_results(results, path)
+    [seed] = tracking.read_seeds(path, FS)
+    assert seed["refined"] and seed["doppler_hz"] == found["fine_doppler_hz"]
+    assert seed["coarse_doppler_hz"] == DOPPLER
+    tr = tracking.track_prn(x, FS, PRN, seed["code_phase_samp"], seed["doppler_hz"],
+                            refine=False)
+    assert tr["doppler_hz"][0] == pytest.approx(seed["doppler_hz"])
+    # The npz keeps both: where the loop started, and the search-grid Doppler.
+    npz = tmp_path / tracking.track_file_name(PRN)
+    tracking.save_track(npz, PRN, FS, seed, tr, tracking.summarize(tr))
+    d = tracking.load_track(npz)
+    assert (d["doppler_seed_hz"], d["doppler_coarse_hz"]) == (seed["doppler_hz"], DOPPLER)
 
 
 def test_track_files_round_trip(signal, tmp_path):
