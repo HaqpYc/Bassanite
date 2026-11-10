@@ -93,7 +93,11 @@ def atan2_error(ip, qp):
 @dataclass(frozen=True)
 class TrackOptions:
     """Switches that re-create the bugs described in 03_tracking/NOTES.md, so the
-    UI can show what each decision protects against. The defaults are correct."""
+    UI can show what each decision protects against. The defaults are correct.
+    Measured on capture.bin (NOTES.md has the table): atan2 never locks, a rounded
+    period loses a 2.4 kHz-Doppler satellite after ~0.5 s; without carrier aiding
+    the DLL lags ~2 s then follows, and the phase-order switch changes nothing
+    visible with this loop."""
     discriminator: str = "costas"      # "atan2": chases every data-bit flip
     carrier_aiding: bool = True        # False: code rate ignores the carrier Doppler
     integer_period: bool = True        # False: step a rounded 4000 samples per period

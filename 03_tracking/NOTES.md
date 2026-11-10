@@ -205,3 +205,17 @@ A few details were decisive — worth recording for anyone touching the loop:
 - **Carrier phase is advanced with the frequency used for the block**, before the
   loop filter updates it — otherwise the phase reference and the wipe-off disagree
   and the prompt phasor spins.
+
+Each of these can be switched back on purpose with `TrackOptions` (in
+`bassanite/tracking.py`), which the Track tab's **Break it** card uses. Re-measured on
+PRN 20 and PRN 5 of `capture.bin` (2026-11-10, 5 s from the coarse acquisition
+Doppler):
+
+| Switch | Effect |
+|---|---|
+| `discriminator="atan2"` | never locks: \|Q\|/\|I\| 0.4–0.7, Doppler wandering over more than 100 Hz |
+| `integer_period=False` | PRN 20 (2425 Hz) loses lock after ≈0.5 s; PRN 5 (≈ −90 Hz) stays locked while (E−L)/(E+L) creeps from +0.2 to +0.5 over 5 s |
+| `carrier_aiding=False` | the 1 Hz DLL lags for ≈2 s ((E−L)/(E+L) −0.4 at the start) and then follows the drift; no loss of lock |
+| `phase_before_update=False` | no measurable difference with the current loop |
+
+The UI offers only the first two: the last two change nothing visible in its plots.

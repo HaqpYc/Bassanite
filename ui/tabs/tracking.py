@@ -21,7 +21,7 @@ from bassanite.provenance import read_meta  # noqa: E402,I001
 from bassanite.results import tracking_dir  # noqa: E402
 from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
                                 LOCK_QI_MAX, MIN_SECONDS_FOR_EPHEMERIS, MS_PER_BIT,
-                                SUMMARY_CSV, bit_sync_scores,
+                                SUMMARY_CSV, TrackOptions, bit_sync_scores,
                                 read_summary, summarize, track_file_name, track_prn)
 from bassanite.tracking import load_track as read_track_file  # noqa: E402
 from common.iq_loader import load_iq  # noqa: E402
@@ -191,9 +191,10 @@ def bit_at(tr: Track, ms: int) -> int:
 # --- try it: PLL bandwidth ---------------------------------------------------------------------
 
 def try_pll(x: np.ndarray, fs: float, prn: int, code_phase: float, doppler: float,
-            pll_bw: float) -> dict:
-    """Track a short stretch with another PLL bandwidth and judge the lock."""
-    tr = track_prn(x, fs, prn, code_phase, doppler, pll_bw=pll_bw)
+            pll_bw: float = DEFAULT_PLL_BW, options: TrackOptions = TrackOptions()) -> dict:
+    """Track a short stretch with another PLL bandwidth (or with a bug switched on)
+    and judge the lock."""
+    tr = track_prn(x, fs, prn, code_phase, doppler, pll_bw=pll_bw, options=options)
     i, q = tr["i_prompt"], tr["q_prompt"]
     settled = slice(min(TRY_SETTLE_MS, len(i) // 2), None)
     qi = float(np.median(np.abs(q[settled])) / (np.median(np.abs(i[settled])) + 1e-9))
@@ -547,6 +548,122 @@ def try_figures(r: dict, t0: float) -> tuple[dict, dict]:
     return iq, dop
 
 
+# --- the map: the two loops as a block diagram -------------------------------------------------
+
+_BOX_FILL, _BOX_LINE, _WIRE_C = "#eceff1", "#90a4ae", "#546e7a"
+_CARRIER_C, _CODE_C, _BROKEN_C = "#1565c0", "#2e7d32", "#c62828"
+
+# Each block: key -> (x, y, width, height, title, function shown in the Code tabs)
+_BLOCKS = {
+    "signal": (10, 130, 90, 40, "Signal", "x[n]"),
+    "correlate": (180, 112, 140, 76, "Correlators", "correlate()"),
+    "costas": (385, 28, 150, 46, "Carrier discriminator", "costas_error()"),
+    "pll": (565, 28, 120, 46, "Loop filter", "LoopFilter (PLL)"),
+    "carrier_nco": (715, 28, 135, 46, "Carrier NCO", "carr_f, carr_phase"),
+    "bits": (385, 128, 150, 44, "Prompt → data bits", "bit_sync()"),
+    "dll": (385, 226, 150, 46, "Code discriminator", "dll_error()"),
+    "dll_filter": (565, 226, 120, 46, "Loop filter", "LoopFilter (DLL)"),
+    "code_nco": (715, 226, 135, 46, "Code NCO", "code_rate()"),
+}
+# What a "break it" switch breaks: (block, label shown in red under it).
+BROKEN_BLOCKS = {
+    "atan2": ("costas", "atan2: chases every bit flip"),
+    "rounded": ("code_nco", "rounded 4000-sample period"),
+}
+
+
+def _box(key: str, broken: bool) -> str:
+    x, y, w, h, title, func = _BLOCKS[key]
+    line = _BROKEN_C if broken else _BOX_LINE
+    return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="{_BOX_FILL}" '
+            f'stroke="{line}" stroke-width="{3 if broken else 1.2}"/>'
+            f'<text x="{x + w / 2}" y="{y + h / 2 - 3}" font-size="12" font-weight="bold" '
+            f'text-anchor="middle">{title}</text>'
+            f'<text x="{x + w / 2}" y="{y + h / 2 + 13}" font-size="10.5" text-anchor="middle" '
+            f'font-family="monospace" fill="#37474f">{func}</text>')
+
+
+def _line(points, color=_WIRE_C, dashed=False, arrow=True, marker="w") -> str:
+    pts = " ".join(f"{x},{y}" for x, y in points)
+    dash = ' stroke-dasharray="6 4"' if dashed else ""
+    end = f' marker-end="url(#loops-arrow-{marker})"' if arrow else ""
+    return (f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.6"'
+            f'{dash}{end}/>')
+
+
+def _label(x, y, text, color="#455a64", anchor="middle", size=10.5) -> str:
+    return (f'<text x="{x}" y="{y}" font-size="{size}" text-anchor="{anchor}" '
+            f'fill="{color}">{text}</text>')
+
+
+def loops_svg(broken: tuple[str, ...] = ()) -> str:
+    """The tracking channel as a block diagram: the carrier loop on top (blue), the
+    code loop below (green), each block named after the function that runs it.
+    `broken` lists BROKEN_BLOCKS keys to draw in red."""
+    bad = {BROKEN_BLOCKS[k][0]: BROKEN_BLOCKS[k][1] for k in broken}
+    markers = "".join(
+        f'<marker id="loops-arrow-{m}" markerWidth="8" markerHeight="8" refX="7" refY="4" '
+        f'orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="{c}"/></marker>'
+        for m, c in (("w", _WIRE_C), ("c", _CARRIER_C), ("k", _CODE_C)))
+    p = ['<svg viewBox="0 0 860 330" xmlns="http://www.w3.org/2000/svg" '
+         'style="width:100%;max-width:860px;font-family:sans-serif">',
+         f"<defs>{markers}</defs>"]
+    # Signal -> mixer (carrier wipe-off) -> correlators
+    p.append(_line([(100, 150), (131, 150)]))
+    p.append(f'<circle cx="140" cy="150" r="9" fill="white" stroke="{_WIRE_C}" '
+             'stroke-width="1.5"/><path d="M134,144 L146,156 M146,144 L134,156" '
+             f'stroke="{_WIRE_C}" stroke-width="1.5"/>')
+    p.append(_label(140, 182, "wipe-off"))
+    p.append(_line([(149, 150), (179, 150)]))
+    # Carrier loop (top): prompt -> Costas -> filter -> NCO -> back to the mixer
+    p.append(_line([(320, 128), (355, 128), (355, 51), (384, 51)], _CARRIER_C, marker="c"))
+    p.append(_label(337, 120, "P", _CARRIER_C))
+    p.append(_line([(535, 51), (564, 51)], _CARRIER_C, marker="c"))
+    p.append(_line([(685, 51), (714, 51)], _CARRIER_C, marker="c"))
+    p.append(_line([(782, 28), (782, 12), (140, 12), (140, 140)], _CARRIER_C, marker="c"))
+    p.append(_label(460, 8, "local carrier: cos and sin at carr_f", _CARRIER_C))
+    # Prompt -> bits
+    p.append(_line([(320, 150), (384, 150)]))
+    # Code loop (bottom): E, L -> E-L discriminator -> filter -> NCO -> replica
+    p.append(_line([(320, 172), (355, 172), (355, 249), (384, 249)], _CODE_C, marker="k"))
+    p.append(_label(337, 186, "E, L", _CODE_C))
+    p.append(_line([(535, 249), (564, 249)], _CODE_C, marker="k"))
+    p.append(_line([(685, 249), (714, 249)], _CODE_C, marker="k"))
+    p.append(_line([(782, 272), (782, 300), (250, 300), (250, 189)], _CODE_C, marker="k"))
+    p.append(_label(500, 316, "code replica, early/prompt/late at ±½ chip", _CODE_C))
+    # Carrier aiding: the carrier NCO sets the code rate too
+    p.append(_line([(760, 74), (760, 225)], _WIRE_C, dashed=True))
+    p.append(_label(752, 140, "carrier aiding", anchor="end"))
+    p.append(_label(752, 155, "f_code = 1.023 MHz", anchor="end", size=9.5))
+    p.append(_label(752, 168, "× (1 + f_D / f_L1)", anchor="end", size=9.5))
+    for key in _BLOCKS:
+        p.append(_box(key, key in bad))
+        if key in bad:
+            x, y, w, h, *_ = _BLOCKS[key]
+            ty = y + h + 14 if y < 150 else 318      # bottom row: below the replica wire
+            p.append(_label(x + w / 2, ty, "⚠ " + bad[key], _BROKEN_C))
+    p.append("</svg>")
+    return "".join(p)
+
+
+def break_verdict(broken: tuple[str, ...], r: dict) -> str:
+    """One sentence on what a break-it run shows."""
+    lock = (f"|Q|/|I| = {r['qi']:.2f} after {TRY_SETTLE_MS} ms "
+            f"({'locked' if r['locked'] else f'not locked: needs < {LOCK_QI_MAX}'})")
+    if not broken:
+        return f"✅ Both decisions as in the receiver: {lock}."
+    why = []
+    if "atan2" in broken:
+        why.append("With atan2, every data-bit flip looks like a half-cycle phase jump, "
+                   "and the loop chases it.")
+    if "rounded" in broken:
+        why.append("Each period is cut at exactly 4000 samples, while with this Doppler "
+                   "the code repeats a fraction of a sample sooner or later, so the "
+                   "replica slides off the code.")
+    head = "❌ " if not r["locked"] else "⚠️ Still locked, for now: "
+    return f"{head}{lock}. " + " ".join(why)
+
+
 # --- the tab ------------------------------------------------------------------------------------
 
 HANDOVER_COLUMNS = [
@@ -582,6 +699,7 @@ class TrackingTab:
         self._try_x = None
         self._try_key = None
         self._try_seq = 0
+        self._break_seq = 0
         self._figs: dict[str, dict] = {}
 
     def request_update(self) -> None:
@@ -590,6 +708,7 @@ class TrackingTab:
     # --- layout -----------------------------------------------------------------------
 
     def build(self) -> None:
+        self._build_map()
         with ui.row().classes("w-full items-start gap-4"):
             self._build_controls()
             with ui.column().classes("flex-1 min-w-[18rem] gap-4"):
@@ -597,6 +716,7 @@ class TrackingTab:
                 self._build_satellites()
         self._build_detail()
         self._build_try_it()
+        self._build_break_it()
         self._build_handover()
         ui.timer(0.3, self._tick)
         self.play_timer = ui.timer(PLAY_TICK_S, self._play_tick, active=False)
@@ -743,6 +863,32 @@ class TrackingTab:
                 self.p_try_dop = ui.plotly(empty_figure()).classes("w-full")
             explain_panel("tracking", "pll")
         self.try_card.set_visibility(False)
+
+    def _build_map(self) -> None:
+        with self._card("The map: two feedback loops",
+                        "Every millisecond, each satellite's channel runs these blocks once. "
+                        "The carrier loop (blue) keeps the local carrier on the satellite's "
+                        "frequency and phase; the code loop (green) keeps the code replica "
+                        "aligned. The names are the functions in bassanite/tracking.py."):
+            ui.html(loops_svg(), sanitize=False).classes("w-full")
+
+    def _build_break_it(self) -> None:
+        with self._card("Break it: the bugs that kept the loops from locking",
+                        f"Re-track the first {TRY_SECONDS:g} s of the selected satellite with "
+                        "one or both of these decisions undone. Both were real bugs while "
+                        "this receiver was written (03_tracking/NOTES.md).") as self.break_card:
+            with ui.row().classes("w-full items-center gap-6"):
+                self.break_atan2 = ui.switch("atan2 instead of atan (Costas)",
+                                             on_change=lambda: self._break())
+                self.break_rounded = ui.switch("Round the code period to whole samples",
+                                               on_change=lambda: self._break())
+            self.break_verdict = ui.label().classes("text-sm")
+            self.break_map = ui.html(loops_svg(), sanitize=False).classes("w-full")
+            with ui.grid().classes("w-full grid-cols-1 lg:grid-cols-2 gap-4"):
+                self.p_break_iq = ui.plotly(empty_figure()).classes("w-full")
+                self.p_break_dop = ui.plotly(empty_figure()).classes("w-full")
+            explain_panel("tracking", "break_it")
+        self.break_card.set_visibility(False)
 
     def _build_handover(self) -> None:
         with self._card("What goes to decoding",
@@ -921,6 +1067,7 @@ class TrackingTab:
         self.cards.clear()
         self.detail_card.set_visibility(False)
         self.try_card.set_visibility(False)
+        self.break_card.set_visibility(False)
         self.handover.rows = []
         self.stop_play()
 
@@ -985,6 +1132,7 @@ class TrackingTab:
         if prn is None or prn not in self.tracks:
             self.detail_card.set_visibility(False)
             self.try_card.set_visibility(False)
+            self.break_card.set_visibility(False)
             return
         changed = prn != self.selected
         self.selected = prn
@@ -992,6 +1140,7 @@ class TrackingTab:
         row = next((r for r in self.rows if r["prn"] == prn), None)
         self.detail_card.set_visibility(True)
         self.try_card.set_visibility(True)
+        self.break_card.set_visibility(True)
         state_text = ("locked" if row and row["locked"] else "not locked")
         self.detail_title.set_text(f"PRN {prn} up close ({state_text})")
         if changed:
@@ -1019,6 +1168,7 @@ class TrackingTab:
         self.slider.set_value(round(tr.t0 + self.end_ms / 1000, 2))
         self._show_window(move_cursors=False)
         self._try(int(self.try_slider.value))
+        self._break()
 
     def _cursor_span(self, tr: Track) -> tuple[float, float]:
         sl = window_slice(tr.n_ms, self.end_ms, self.window_ms)
@@ -1099,6 +1249,15 @@ class TrackingTab:
         self.try_label.set_text(f"PLL bandwidth: {bw} Hz")
         background_tasks.create(self._run_try(bw), name="pll try-it")
 
+    async def _try_samples(self, tr: Track, src: IQSource) -> np.ndarray:
+        """The first TRY_SECONDS of the selected track, loaded once for both try-its."""
+        key = (str(src.path), src.size_bytes, src.fmt, src.fs, tr.t0)
+        if key != self._try_key:
+            self._try_x = await run.io_bound(load_iq, src.path, src.fmt, src.fs,
+                                             TRY_SECONDS, tr.t0)
+            self._try_key = key
+        return self._try_x
+
     async def _run_try(self, bw: float) -> None:
         tr, src = self.tracks.get(self.selected), state.source
         if tr is None or src is None:
@@ -1106,17 +1265,12 @@ class TrackingTab:
         self._try_seq += 1
         seq = self._try_seq
         self.try_verdict.set_text("Tracking…")
-        key = (str(src.path), src.size_bytes, src.fmt, src.fs, tr.t0)
         try:
-            if key != self._try_key:
-                self._try_x = await run.io_bound(load_iq, src.path, src.fmt, src.fs,
-                                                 TRY_SECONDS, tr.t0)
-                self._try_key = key
+            x = await self._try_samples(tr, src)
             # From the coarse search bin, with the pull-in search: the problem a
             # loop faces when nothing refined its starting frequency.
-            r = await run.io_bound(try_pll, self._try_x, src.fs, tr.prn,
-                                   tr.seed_code_phase, tr.coarse_doppler or tr.seed_doppler,
-                                   bw)
+            r = await run.io_bound(try_pll, x, src.fs, tr.prn, tr.seed_code_phase,
+                                   tr.coarse_doppler or tr.seed_doppler, bw)
         except (OSError, ValueError) as err:
             self.try_verdict.set_text(f"Could not track: {err}")
             return
@@ -1134,3 +1288,36 @@ class TrackingTab:
         iq, dop = try_figures(r, tr.t0)
         self.p_try_iq.update_figure(iq)
         self.p_try_dop.update_figure(dop)
+
+    # --- break it ---------------------------------------------------------------------------
+
+    def _break(self) -> None:
+        broken = tuple(k for k, sw in (("atan2", self.break_atan2),
+                                       ("rounded", self.break_rounded)) if sw.value)
+        self.break_map.set_content(loops_svg(broken))
+        background_tasks.create(self._run_break(broken), name="break-it")
+
+    async def _run_break(self, broken: tuple[str, ...]) -> None:
+        tr, src = self.tracks.get(self.selected), state.source
+        if tr is None or src is None:
+            return
+        self._break_seq += 1
+        seq = self._break_seq
+        self.break_verdict.set_text("Tracking…")
+        options = TrackOptions(discriminator="atan2" if "atan2" in broken else "costas",
+                               integer_period="rounded" not in broken)
+        try:
+            x = await self._try_samples(tr, src)
+            # The real starting point (step 2's refined Doppler), so only the bug differs.
+            r = await run.io_bound(try_pll, x, src.fs, tr.prn, tr.seed_code_phase,
+                                   tr.seed_doppler, DEFAULT_PLL_BW, options)
+        except (OSError, ValueError) as err:
+            self.break_verdict.set_text(f"Could not track: {err}")
+            return
+        if seq != self._break_seq:
+            return
+        self.break_verdict.set_text(f"PRN {tr.prn}: " + break_verdict(broken, r))
+        iq, dop = try_figures(r, tr.t0)
+        self.p_break_iq.update_figure(iq)
+        self.p_break_dop.update_figure(dop)
+

@@ -181,6 +181,29 @@ def test_pll_bandwidth_too_wide_loses_lock():
     assert np.std(wild["doppler"][500:]) > 10 * np.std(good["doppler"][500:])
 
 
+def test_break_it_switches_break_the_lock():
+    from bassanite.tracking import TrackOptions
+    x = synthetic_gps(1.5, cn0_dbhz=45.0)          # 1500 Hz: code period 3999.996 samples
+    good = trk.try_pll(x, FS, PRN, CODE_PHASE_SAMP, DOPPLER + 12)
+    atan2 = trk.try_pll(x, FS, PRN, CODE_PHASE_SAMP, DOPPLER + 12,
+                        options=TrackOptions(discriminator="atan2"))
+    rounded = trk.try_pll(x, FS, PRN, CODE_PHASE_SAMP, DOPPLER + 12,
+                          options=TrackOptions(integer_period=False))
+    assert good["locked"] and not atan2["locked"] and not rounded["locked"]
+    assert "the loop chases it" in trk.break_verdict(("atan2",), atan2)
+    assert trk.break_verdict((), good).startswith("✅")
+
+
+def test_loop_map_names_the_functions_and_marks_the_bug():
+    svg = trk.loops_svg()
+    for name in ("correlate()", "costas_error()", "dll_error()", "LoopFilter (PLL)",
+                 "code_rate()", "carrier aiding"):
+        assert name in svg
+    assert "⚠" not in svg
+    broken = trk.loops_svg(("atan2", "rounded"))
+    assert "atan2: chases every bit flip" in broken and "rounded 4000-sample" in broken
+
+
 # --- the page -------------------------------------------------------------------------------------
 
 async def test_tab_runs_tracking_into_a_temporary_folder(user: User, tmp_path,
