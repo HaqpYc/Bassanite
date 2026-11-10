@@ -274,7 +274,7 @@ contract between stages, so the UI and the command-line scripts stay interchange
 ## 7. Review recommendations (2026-11-10)
 
 From a review of stages 01–03 and their tabs against the project's goal: modular
-and educational. Nothing here is built yet. Within each table, the most important
+and educational. Items marked ✅ are built. Within each table, the most important
 item comes first.
 
 ### Finding: `capture.bin` is too short for a position fix
@@ -301,7 +301,7 @@ always cuts one. Subframes 1, 2 and 3 are each complete at least once only from
 | B1 | **Record 40–60 s outdoors** and use it as the reference for stages 04–05. Change the tracking default (`DEFAULT_SECONDS = 30` in `ui/tabs/tracking.py`, whose comment says 30 s holds every subframe) | See the finding above: `capture.bin` lacks `af0` |
 | B2 | **Read the recording in blocks** (memory-map the int8 file, convert each block) instead of loading it all as complex64 | 30 s costs about 960 MB, and 60 s would cost about 1.9 GB, more than this machine has free. Tracking only touches about 4000 samples per step. This removes the reason for the memory warning and the 10 s `reconnect_timeout` |
 | B3 | **One results folder per recording**, git-ignored (the `runs/` idea of section 4, keyed by recording rather than by time alone) | Scan and Track write into the git-tracked `02_acquisition/` and `03_tracking/`, so a button press overwrites committed files, and only one recording's results can exist at a time. Each new stage adds more files to that single slot |
-| B4 | **Define each file format in one place**, with save and load next to the algorithm in `bassanite/` | `scan_results.csv` has three readers (`bassanite/acquisition.py`, `bassanite/tracking.py`, `ui/stages.py`). The track `.npz` is written in `03_tracking/track.py` and read in `ui/tabs/tracking.py`. The summary CSV is written in `track.py` and read in two UI files. Stage 04 would be one more reader |
+| B4 ✅ | **Define each file format in one place**, with save and load next to the algorithm in `bassanite/` | `scan_results.csv` has three readers (`bassanite/acquisition.py`, `bassanite/tracking.py`, `ui/stages.py`). The track `.npz` is written in `03_tracking/track.py` and read in `ui/tabs/tracking.py`. The summary CSV is written in `track.py` and read in two UI files. Stage 04 would be one more reader |
 | B5 | **Move receiver algorithms out of the UI:** `persistence()` and `refine_doppler()` from `ui/tabs/acquisition.py` into `bassanite/acquisition.py`, with a command-line option for the persistence check. Make the refined Doppler part of what acquisition hands over | Tracking has its own, different `fine_doppler()`, so there are two fine-Doppler searches. The persistence check is how a weak detection is confirmed, yet only the UI can run it |
 | B6 | **Split `track_prn` into the blocks of the textbook diagram:** correlators, discriminators, loop filter, oscillator, with one `step()` per satellite and per millisecond | The loop-filter update is written inline twice, so the "loops" panel's Code tab shows only `calc_loop_coef`, not the equation its Math tab explains. Named blocks also allow the "break it" switches (U4) and tracking every satellite in one pass over the file |
 | B7 | **Packaging** (low priority): a `pyproject.toml` with an editable install, `common/` folded into `bassanite/`, backend tests out of `ui/tests/` | 11 `sys.path.insert` calls, 43 `noqa: E402` markers, and the L1 frequency defined four times |

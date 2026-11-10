@@ -2,7 +2,6 @@
 then replay the recording to watch them lock and the data bits appear."""
 from __future__ import annotations
 
-import csv
 import os
 import re
 import shutil
@@ -19,9 +18,10 @@ from state import REPO_ROOT, IQSource, state  # first: puts the repo root on sys
 
 import tabs.acquisition as acquisition  # noqa: E402  (its RESULTS_CSV is the seed file)
 from bassanite.provenance import read_meta  # noqa: E402,I001
-from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW, DETAIL_KEYS,  # noqa: E402
-                                LOCK_QI_MAX, MS_PER_BIT, bit_sync_scores, summarize,
-                                track_prn)
+from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
+                                LOCK_QI_MAX, MS_PER_BIT, SUMMARY_CSV, bit_sync_scores,
+                                read_summary, summarize, track_file_name, track_prn)
+from bassanite.tracking import load_track as read_track_file  # noqa: E402
 from common.iq_loader import load_iq  # noqa: E402
 from components import explain_panel  # noqa: E402
 from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure, layout  # noqa: E402
@@ -66,20 +66,7 @@ def estimate(src: IQSource, seconds: float, n_prns: int) -> tuple[float, float]:
 
 
 def summary_path(track_dir: Path | None = None) -> Path:
-    return (track_dir or TRACK_DIR) / "tracking_summary.csv"
-
-
-def read_summary(path: Path) -> list[dict]:
-    with open(path, newline="") as f:
-        rows = [{"prn": int(r["prn"]), "ms_tracked": int(r["ms_tracked"]),
-                 "final_doppler_hz": float(r["final_doppler_hz"]),
-                 "mean_cn0_dbhz": float(r["mean_cn0_dbhz"]),
-                 "pll_lock_qi": float(r["pll_lock_qi"]),
-                 "bit_offset": int(r["bit_offset"]), "nbits": int(r["nbits"])}
-                for r in csv.DictReader(f)]
-    for r in rows:
-        r["locked"] = r["pll_lock_qi"] < LOCK_QI_MAX
-    return rows
+    return (track_dir or TRACK_DIR) / SUMMARY_CSV
 
 
 def saved_tracking(src: IQSource, track_dir: Path | None = None
@@ -124,19 +111,16 @@ _track_cache: dict[tuple, Track] = {}
 def load_track(path: Path, t0: float) -> Track:
     key = (str(path), path.stat().st_mtime_ns, t0)
     if key not in _track_cache:
-        with np.load(path) as d:
-            detail = ({k: d[k] for k in DETAIL_KEYS}
-                      if all(k in d.files for k in DETAIL_KEYS) else None)
-            _track_cache[key] = Track(
-                int(d["prn"]), float(d["fs"]), t0, d["i_prompt"], d["q_prompt"],
-                d["doppler_hz"], d["code_phase_samp"], d["nav_bits"], d["cn0_dbhz"],
-                int(d["bit_offset"]), float(d["doppler_seed_hz"]),
-                float(d["code_phase_samp_seed"]), detail)
+        d = read_track_file(path)
+        _track_cache[key] = Track(
+            d["prn"], d["fs"], t0, d["i_prompt"], d["q_prompt"], d["doppler_hz"],
+            d["code_phase_samp"], d["nav_bits"], d["cn0_dbhz"], d["bit_offset"],
+            d["doppler_seed_hz"], d["code_phase_samp_seed"], d["detail"])
     return _track_cache[key]
 
 
 def track_file(prn: int, track_dir: Path | None = None) -> Path:
-    return (track_dir or TRACK_DIR) / f"track_PRN{prn:02d}.npz"
+    return (track_dir or TRACK_DIR) / track_file_name(prn)
 
 
 def window_slice(n_ms: int, end_ms: int, w_ms: int) -> slice:
@@ -348,7 +332,7 @@ class TrackingRun:
 
     def succeeded(self) -> bool:
         return (not self.cancelled and self.proc is not None and self.proc.poll() == 0
-                and (self.out_dir / "tracking_summary.csv").is_file())
+                and summary_path(self.out_dir).is_file())
 
     def finish(self) -> list[str]:
         """Move the results into place. Returns the file names moved."""

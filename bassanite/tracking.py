@@ -22,6 +22,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from bassanite.acquisition import read_results  # noqa: E402
 from common.ca_code import CHIP_RATE, CODE_LENGTH, ca_code  # noqa: E402
 
 L1_HZ = 1575.42e6                 # GPS L1 carrier (for carrier-aiding the code loop)
@@ -307,18 +308,93 @@ def read_seeds(csv_path, fs, only_detected=True):
     Returns a list of dicts {prn, doppler_hz, code_phase_samp, peak_over_mean}.
     """
     spms = int(round(fs * 1e-3))
-    seeds = []
-    with open(csv_path, newline="") as f:
-        for row in csv.DictReader(f):
-            detected = str(row.get("detected", "")).strip().lower() == "true"
-            if only_detected and not detected:
-                continue
-            chips = float(row["code_phase_chips"])
-            seeds.append({
-                "prn": int(row["prn"]),
-                "doppler_hz": float(row["doppler_hz"]),
-                "code_phase_samp": chips * spms / CODE_LENGTH,
-                "peak_over_mean": float(row.get("peak_over_mean", 0.0)),
-            })
+    seeds = [{"prn": r["prn"], "doppler_hz": r["doppler_hz"],
+              "code_phase_samp": r["code_phase_chips"] * spms / CODE_LENGTH,
+              "peak_over_mean": r["peak_over_mean"]}
+             for r in read_results(csv_path) if r["detected"] or not only_detected]
     seeds.sort(key=lambda s: s["prn"])
     return seeds
+
+
+# --- result files: the hand-over to stage 04 (written and read only here) -----------
+#
+#   track_PRNnn.npz        one per satellite: the 1 kHz loop outputs, the 50 bps bits
+#                          and the 50 Hz quality figures (see save_track)
+#   tracking_summary.csv   one row per satellite (SUMMARY_FIELDS)
+
+SUMMARY_CSV = "tracking_summary.csv"
+SUMMARY_FIELDS = ("prn", "ms_tracked", "final_doppler_hz", "mean_cn0_dbhz",
+                  "pll_lock_qi", "bit_offset", "nbits")
+
+
+def track_file_name(prn):
+    return f"track_PRN{prn:02d}.npz"
+
+
+def save_track(path, prn, fs, seed, track, result):
+    """Write one satellite's track_prn() output and its summarize() result."""
+    np.savez(
+        path,
+        # dense 1 kHz streams
+        i_prompt=track["i_prompt"], q_prompt=track["q_prompt"],
+        doppler_hz=track["doppler_hz"], code_phase_samp=track["code_phase_samp"],
+        # loop internals at 1 kHz: Early/Late correlators and both discriminators
+        **{k: track[k] for k in DETAIL_KEYS if k in track},
+        # derived 50 bps stream
+        nav_symbols=result["symbols"], nav_bits=result["bits"],
+        # 50 Hz block-rate quality
+        cn0_dbhz=result["cn0"], lock_cos=result["lock_cos"],
+        # scalars / metadata
+        prn=prn, fs=fs, prompt_rate_hz=PROMPT_RATE_HZ, ms_per_bit=MS_PER_BIT,
+        bit_offset=result["bit_offset"],
+        seconds_tracked=len(track["i_prompt"]) / PROMPT_RATE_HZ,
+        doppler_seed_hz=seed["doppler_hz"],
+        code_phase_samp_seed=seed["code_phase_samp"],
+    )
+    return path
+
+
+def load_track(path):
+    """Read a track_PRNnn.npz back. Returns a dict: the 1 kHz arrays (i_prompt,
+    q_prompt, doppler_hz, code_phase_samp), nav_bits, cn0_dbhz, the scalars prn,
+    fs, bit_offset, doppler_seed_hz, code_phase_samp_seed, and `detail` (the
+    DETAIL_KEYS arrays, or None for files saved without them)."""
+    with np.load(path) as d:
+        out = {k: d[k] for k in ("i_prompt", "q_prompt", "doppler_hz", "code_phase_samp",
+                                 "nav_bits", "cn0_dbhz")}
+        out.update(prn=int(d["prn"]), fs=float(d["fs"]), bit_offset=int(d["bit_offset"]),
+                   doppler_seed_hz=float(d["doppler_seed_hz"]),
+                   code_phase_samp_seed=float(d["code_phase_samp_seed"]))
+        out["detail"] = ({k: d[k] for k in DETAIL_KEYS}
+                         if all(k in d.files for k in DETAIL_KEYS) else None)
+    return out
+
+
+def summary_row(prn, track, result):
+    """The tracking_summary.csv row for one satellite."""
+    return {"prn": prn, "ms_tracked": len(track["i_prompt"]),
+            "final_doppler_hz": round(float(track["doppler_hz"][-1]), 1),
+            "mean_cn0_dbhz": round(result["mean_cn0"], 1),
+            "pll_lock_qi": round(result["qi"], 3),
+            "bit_offset": result["bit_offset"], "nbits": len(result["bits"])}
+
+
+def write_summary(rows, path):
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(SUMMARY_FIELDS))
+        w.writeheader()
+        w.writerows({k: r[k] for k in SUMMARY_FIELDS} for r in rows)
+
+
+def read_summary(path):
+    """Read tracking_summary.csv. Each row also gets `locked` (|Q|/|I| test)."""
+    with open(path, newline="") as f:
+        rows = [{"prn": int(r["prn"]), "ms_tracked": int(r["ms_tracked"]),
+                 "final_doppler_hz": float(r["final_doppler_hz"]),
+                 "mean_cn0_dbhz": float(r["mean_cn0_dbhz"]),
+                 "pll_lock_qi": float(r["pll_lock_qi"]),
+                 "bit_offset": int(r["bit_offset"]), "nbits": int(r["nbits"])}
+                for r in csv.DictReader(f)]
+    for r in rows:
+        r["locked"] = r["pll_lock_qi"] < LOCK_QI_MAX
+    return rows

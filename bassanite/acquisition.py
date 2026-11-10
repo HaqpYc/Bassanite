@@ -29,7 +29,8 @@ DEFAULT_MS = 10
 DEFAULT_THRESHOLD = 5.0
 L1_HZ = 1575.42e6
 
-# Columns of scan_results.csv, the file stage 03 reads its seeds from.
+# scan_results.csv, the file stage 03 reads its seeds from, and its columns.
+SCAN_CSV = "scan_results.csv"
 CSV_FIELDS = ("prn", "doppler_hz", "code_phase_samp", "code_phase_chips",
               "peak_over_mean", "detected")
 
@@ -131,6 +132,8 @@ def cn0_from_peak(peak_over_mean, coherent_s=1e-3):
     return 10 * np.log10(max(peak_over_mean - 1.0, 1e-12) / coherent_s)
 
 
+# --- scan_results.csv: the hand-over to stage 03 (written and read only here) ---
+
 def write_results(results, path):
     """Write scan results (as returned by `scan`) to a CSV file."""
     with open(path, "w", newline="") as f:
@@ -140,12 +143,15 @@ def write_results(results, path):
 
 
 def read_results(path):
-    """Read a scan_results.csv back into the dicts `scan` returns."""
+    """Read a scan_results.csv back into the dicts `scan` returns.
+
+    Columns other than CSV_FIELDS are ignored, so older and newer files load.
+    """
     with open(path, newline="") as f:
         return [{"prn": int(r["prn"]),
                  "doppler_hz": float(r["doppler_hz"]),
-                 "code_phase_samp": int(r["code_phase_samp"]),
+                 "code_phase_samp": int(float(r["code_phase_samp"])),
                  "code_phase_chips": float(r["code_phase_chips"]),
-                 "peak_over_mean": float(r["peak_over_mean"]),
-                 "detected": r["detected"] == "True"}
+                 "peak_over_mean": float(r.get("peak_over_mean") or 0.0),
+                 "detected": str(r.get("detected", "")).strip().lower() == "true"}
                 for r in csv.DictReader(f)]

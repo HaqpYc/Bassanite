@@ -61,6 +61,47 @@ def test_summarize_needs_one_bit():
     assert tracking.summarize(short) is None
 
 
+def test_scan_results_round_trip_and_seeds(signal, tmp_path):
+    results = acquisition.scan(signal, FS, -2000, 2000, 250, 10, 5.0, prns=[PRN, 1])
+    path = tmp_path / acquisition.SCAN_CSV
+    acquisition.write_results(results, path)
+    assert acquisition.read_results(path) == results
+    seeds = tracking.read_seeds(path, 2 * FS)            # converted to this sample rate
+    assert [s["prn"] for s in seeds] == [PRN]
+    assert seeds[0]["code_phase_samp"] == pytest.approx(2 * CODE_PHASE_SAMP)
+    assert len(tracking.read_seeds(path, FS, only_detected=False)) == 2
+
+
+def test_scan_results_tolerate_other_columns(tmp_path):
+    path = tmp_path / acquisition.SCAN_CSV
+    path.write_text("prn,doppler_hz,code_phase_samp,code_phase_chips,detected,extra\n"
+                    "5,250.0,10,2.5575,true,x\n")
+    assert acquisition.read_results(path) == [
+        {"prn": 5, "doppler_hz": 250.0, "code_phase_samp": 10, "code_phase_chips": 2.5575,
+         "peak_over_mean": 0.0, "detected": True}]
+
+
+def test_track_files_round_trip(signal, tmp_path):
+    seed = {"prn": PRN, "doppler_hz": DOPPLER, "code_phase_samp": CODE_PHASE_SAMP}
+    tr = tracking.track_prn(signal, FS, PRN, CODE_PHASE_SAMP, DOPPLER, detail=True)
+    r = tracking.summarize(tr)
+    path = tmp_path / tracking.track_file_name(PRN)
+    assert path.name == "track_PRN07.npz"
+    tracking.save_track(path, PRN, FS, seed, tr, r)
+    d = tracking.load_track(path)
+    assert (d["prn"], d["fs"], d["bit_offset"]) == (PRN, FS, r["bit_offset"])
+    assert np.array_equal(d["i_prompt"], tr["i_prompt"])
+    assert np.array_equal(d["nav_bits"], r["bits"])
+    assert set(d["detail"]) == set(tracking.DETAIL_KEYS)
+    assert d["doppler_seed_hz"] == DOPPLER
+
+    row = tracking.summary_row(PRN, tr, r)
+    summary = tmp_path / tracking.SUMMARY_CSV
+    tracking.write_summary([row], summary)
+    back = tracking.read_summary(summary)
+    assert back == [{**row, "locked": True}]
+
+
 def test_provenance_round_trip(tmp_path):
     rec = tmp_path / "rec.bin"
     rec.write_bytes(bytes(100))

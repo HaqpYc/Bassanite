@@ -50,7 +50,6 @@ Example:
   python 03_tracking/track.py --prn 20 --seconds 5  # one PRN, quick window
 """
 import argparse
-import csv
 import os
 import sys
 
@@ -64,42 +63,11 @@ if _ROOT not in sys.path:
 
 from bassanite.provenance import write_meta                    # noqa: E402
 from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
-                                DETAIL_KEYS, MS_PER_BIT, PROMPT_RATE_HZ,
-                                read_seeds, summarize, track_prn)
+                                MS_PER_BIT, PROMPT_RATE_HZ, SUMMARY_CSV, read_seeds,
+                                save_track, summarize, summary_row, track_file_name,
+                                track_prn, write_summary)
 from common.ca_code import CODE_LENGTH                         # noqa: E402
 from common.iq_loader import load_iq                           # noqa: E402
-
-
-def save_npz(out_dir, prn, fs, seed, track, bit_offset, symbols, bits, cn0, lock):
-    path = os.path.join(out_dir, f"track_PRN{prn:02d}.npz")
-    np.savez(
-        path,
-        # dense 1 kHz streams
-        i_prompt=track["i_prompt"], q_prompt=track["q_prompt"],
-        doppler_hz=track["doppler_hz"], code_phase_samp=track["code_phase_samp"],
-        # loop internals at 1 kHz: Early/Late correlators and both discriminators
-        **{k: track[k] for k in DETAIL_KEYS if k in track},
-        # derived 50 bps stream
-        nav_symbols=symbols, nav_bits=bits,
-        # 50 Hz block-rate quality
-        cn0_dbhz=cn0, lock_cos=lock,
-        # scalars / metadata
-        prn=prn, fs=fs, prompt_rate_hz=PROMPT_RATE_HZ, ms_per_bit=MS_PER_BIT,
-        bit_offset=bit_offset, seconds_tracked=len(track["i_prompt"]) / PROMPT_RATE_HZ,
-        doppler_seed_hz=seed["doppler_hz"],
-        code_phase_samp_seed=seed["code_phase_samp"],
-    )
-    return path
-
-
-def write_summary_csv(rows, path):
-    fields = ["prn", "ms_tracked", "final_doppler_hz", "mean_cn0_dbhz",
-              "pll_lock_qi", "bit_offset", "nbits"]
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        w.writerows(rows)
-    print(f"wrote {path}")
 
 
 def write_plot(out_dir, prn, fs, track, cn0):
@@ -227,16 +195,10 @@ def main():
         if r is None:
             print(f"  PRN {prn:>2}: too few epochs ({len(tr['i_prompt'])}), skipped")
             continue
-        save_npz(a.out_dir, prn, a.fs, s, tr, r["bit_offset"], r["symbols"], r["bits"],
-                 r["cn0"], r["lock_cos"])
+        save_track(os.path.join(a.out_dir, track_file_name(prn)), prn, a.fs, s, tr, r)
         if not a.no_plot:
             write_plot(a.out_dir, prn, a.fs, tr, r["cn0"])
-        summary.append({
-            "prn": prn, "ms_tracked": len(tr["i_prompt"]),
-            "final_doppler_hz": round(float(tr["doppler_hz"][-1]), 1),
-            "mean_cn0_dbhz": round(r["mean_cn0"], 1), "pll_lock_qi": round(r["qi"], 3),
-            "bit_offset": r["bit_offset"], "nbits": len(r["bits"]),
-        })
+        summary.append(summary_row(prn, tr, r))
         lock_txt = "LOCK" if r["locked"] else "weak"
         print(f"  PRN {prn:>2}: {len(tr['i_prompt']):>5} ms  "
               f"Doppler->{tr['doppler_hz'][-1]:>7.0f} Hz  "
@@ -244,8 +206,9 @@ def main():
               f"bit_off={r['bit_offset']}  {len(r['bits'])} bits")
 
     if summary:
-        path = os.path.join(a.out_dir, "tracking_summary.csv")
-        write_summary_csv(summary, path)
+        path = os.path.join(a.out_dir, SUMMARY_CSV)
+        write_summary(summary, path)
+        print(f"wrote {path}")
         write_meta(path, "tracking", a.iq, a.format, a.fs,
                    {"seconds": a.seconds, "skip_seconds": a.skip_seconds,
                     "pll_bw_hz": a.pll_bw, "dll_bw_hz": a.dll_bw,

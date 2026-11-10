@@ -5,14 +5,14 @@ stages), so results produced by the command-line scripts show up here too.
 """
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from pathlib import Path
 
 from state import DEFAULT_RECORDING, REPO_ROOT, IQSource  # first: sets sys.path
 
+from bassanite.acquisition import read_results  # noqa: E402
 from bassanite.provenance import read_meta, same_recording  # noqa: E402
-from bassanite.tracking import LOCK_QI_MAX  # noqa: E402,F401  (|Q|/|I| lock threshold)
+from bassanite.tracking import read_summary  # noqa: E402
 
 MIN_SATS_FOR_FIX = 4
 
@@ -62,12 +62,9 @@ class StageStatus:
         return ICONS[self.state]
 
 
-def _read_csv(rel_path: str) -> list[dict] | None:
+def _read(rel_path: str, reader) -> list[dict] | None:
     path = REPO_ROOT / rel_path
-    if not path.is_file():
-        return None
-    with open(path, newline="") as f:
-        return list(csv.DictReader(f))
+    return reader(path) if path.is_file() else None
 
 
 def _signal_status(source: IQSource | None) -> StageStatus:
@@ -81,26 +78,26 @@ def _signal_status(source: IQSource | None) -> StageStatus:
 
 def _acquisition_status() -> StageStatus:
     path = "02_acquisition/scan_results.csv"
-    rows = _read_csv(path)
+    rows = _read(path, read_results)
     if rows is None:
         return StageStatus("locked", "Not run yet")
-    detected = [r for r in rows if r.get("detected") == "True"]
+    detected = [r for r in rows if r["detected"]]
     if not detected:
         return StageStatus("attention", "No satellite detected", f"from {path}")
-    prns = ", ".join(r["prn"] for r in detected)
+    prns = ", ".join(str(r["prn"]) for r in detected)
     return StageStatus("done", f"{len(detected)} satellites detected (PRN {prns})",
                        f"from {path}")
 
 
 def _tracking_status() -> StageStatus:
     path = "03_tracking/tracking_summary.csv"
-    rows = _read_csv(path)
+    rows = _read(path, read_summary)
     if rows is None:
         return StageStatus("locked", "Not run yet")
-    locked = [r for r in rows if float(r["pll_lock_qi"]) < LOCK_QI_MAX]
+    locked = [r for r in rows if r["locked"]]
     if not locked:
         return StageStatus("attention", "No satellite locked", f"from {path}")
-    cn0 = [float(r["mean_cn0_dbhz"]) for r in locked]
+    cn0 = [r["mean_cn0_dbhz"] for r in locked]
     summary = (f"{len(locked)} of {len(rows)} satellites locked, "
                f"C/N0 {min(cn0):.0f}–{max(cn0):.0f} dB-Hz")
     if len(locked) < MIN_SATS_FOR_FIX:
