@@ -7,11 +7,11 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from state import (GPS_L1_HZ, REPO_ROOT, IQSource, default_source,  # sets sys.path
+from state import (GPS_L1_HZ, REPO_ROOT, IQSource, default_source,
                    guess_format, state)
 
-from bassanite.synthetic import read_truth, write_recording  # noqa: E402
-from common.hackrf import read_sidecar  # noqa: E402
+from bassanite.synthetic import read_truth, write_recording
+from bassanite.hackrf import read_sidecar
 
 RECORDINGS_DIR = REPO_ROOT / "recordings"     # git-ignored
 

@@ -1,12 +1,11 @@
-"""Tests for common/hackrf.py and the capture panel logic. No hardware needed:
-conftest.py hides the HackRF tools from every test."""
+"""Tests for bassanite/hackrf.py. No hardware needed: conftest.py hides the HackRF
+tools from every test."""
 import numpy as np
 import pytest
 
-import common.hackrf as hackrf
-from common.hackrf import (CaptureSettings, band_noise_db, read_sidecar,
+import bassanite.hackrf as hackrf
+from bassanite.hackrf import (CaptureSettings, band_noise_db, read_sidecar,
                            recording_path, write_sidecar)
-from tabs.capture import bias_verdict
 
 
 def test_command_is_receive_only_and_complete(tmp_path):
@@ -67,24 +66,11 @@ def test_steady_noise_ignores_bursts_and_burst_stats_sees_them():
     assert hackrf.steady_noise_db(bursty, 4e6) == pytest.approx(
         hackrf.steady_noise_db(clean, 4e6), abs=0.3)
     assert band_noise_db(bursty, 4e6) > band_noise_db(clean, 4e6) + 5   # plain mean is fooled
-    from common.signal_view import burst_stats
+    from bassanite.signal_view import burst_stats
     b = burst_stats(bursty, 4e6)
     assert b["burst_fraction"] == pytest.approx(0.1, abs=0.02)
     assert b["burst_max_db"] == pytest.approx(14, abs=1)
     assert burst_stats(clean, 4e6)["burst_fraction"] == 0.0
-
-
-def test_burst_message_thresholds():
-    from tabs.signal import burst_message
-    assert burst_message({"burst_fraction": 0.11, "burst_max_db": 15}) is not None
-    assert burst_message({"burst_fraction": 0.01, "burst_max_db": 15}) is None
-    assert burst_message({"burst_fraction": 0.5, "burst_max_db": 1}) is None
-    assert burst_message({}) is None
-
-
-@pytest.mark.parametrize("rise,icon", [(5.2, "✅"), (2.0, "⚠️"), (0.2, "❌"), (-1.0, "❌")])
-def test_bias_verdict(rise, icon):
-    assert bias_verdict(rise)[0] == icon
 
 
 def test_missing_tools_are_reported():

@@ -167,7 +167,7 @@ def test_synthetic_blocks_equal_the_whole_and_files_round_trip(tmp_path):
 
 def test_scan_finds_every_true_satellite_of_a_synthetic_sky(tmp_path):
     from bassanite import synthetic
-    from common.iq_loader import load_iq
+    from bassanite.iq_loader import load_iq
     path = synthetic.write_recording(tmp_path / "sky.bin", 0.05, cn0_dbhz=46.0)
     x = load_iq(path, "int8", FS)
     truth = synthetic.read_truth(path)["satellites"]

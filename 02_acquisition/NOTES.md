@@ -20,7 +20,7 @@ satellite's ID (1–32) and selects which code it sends. The codes are **Gold
 codes**: nearly uncorrelated with shifted copies of themselves (sharp peak when
 aligned) and with each other (satellites don't drown each other out). All
 satellites share the same 1575.42 MHz carrier and are separated *only* by their
-codes — this is CDMA. (Generator: [`../common/ca_code.py`](../common/ca_code.py).)
+codes — this is CDMA. (Generator: [`../bassanite/ca_code.py`](../bassanite/ca_code.py).)
 
 ### 2. Why acquisition is a 2-D search
 For a given PRN we don't know two things:

@@ -1,6 +1,6 @@
 ---
 title: Gold codes: one code per satellite
-code: common/ca_code.py::register_states, ui/tabs/acquisition.py::circular_correlation
+code: bassanite/ca_code.py::register_states, ui/tabs/acquisition.py::circular_correlation
 ---
 ## Intuition
 

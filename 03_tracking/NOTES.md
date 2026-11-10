@@ -107,7 +107,7 @@ correlators and both discriminator outputs in each npz (this changes no result).
 `tracking_summary.csv` gets a `tracking_summary.meta.json` recording which recording
 and settings produced it.
 
-> Memory note: `track.py` reads the recording block by block (`common/iq_loader.py::open_iq`
+> Memory note: `track.py` reads the recording block by block (`bassanite/iq_loader.py::open_iq`
 > memory-maps the file and converts only the ~4000 samples each 1 ms step needs), so
 > memory does not grow with the recording's length. A 30 s run of 8 satellites peaks at
 > about 280 MB of working set, mostly file pages the OS can reclaim. Loading the whole
@@ -117,7 +117,7 @@ and settings produced it.
 
 ## How stage 03 connects to the rest of the pipeline (the file is the interface)
 
-- **From stage 01:** samples are loaded only through `common/iq_loader.py::load_iq`,
+- **From stage 01:** samples are loaded only through `bassanite/iq_loader.py::load_iq`,
   exactly like stage 02 — so a bundled recording and a fresh live `hackrf_transfer`
   capture are handled identically (just `--iq`/`--format`/`--fs`).
 - **From stage 02:** seeds come from `results/<recording>/acquisition/scan_results.csv`. We use the

@@ -15,16 +15,13 @@ The data bits are random, not a navigation message: stages 04-05 need an
 encoder before a synthetic recording can carry an ephemeris and a position.
 """
 import json
-import os
-import sys
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bassanite.acquisition import L1_HZ  # noqa: E402
-from common.ca_code import CHIP_RATE, CODE_LENGTH, ca_code  # noqa: E402
+from bassanite.ca_code import ca_code
+from bassanite.constants import CHIP_RATE, CODE_LENGTH, L1_HZ
 
 FS = 4e6
 # The one satellite synthetic_gps() puts in by default (code phase in samples at FS).

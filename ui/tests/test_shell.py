@@ -2,22 +2,20 @@
 
     python -m pytest ui/tests
 """
-import sys
 from pathlib import Path
 
 import markdown2
 import pytest
 
 UI_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(UI_DIR))
 
-from explain import (EXPLAIN_DIR, fill, function_source, load_panel,  # noqa: E402
+from explain import (EXPLAIN_DIR, fill, function_source, load_panel,
                      load_story, panel_names, placeholders)
-from explain_values import explain_values  # noqa: E402
-from stages import STAGES, stage_status  # noqa: E402
-from state import IQSource, guess_format  # noqa: E402
+from explain_values import explain_values
+from stages import STAGES, stage_status
+from state import IQSource, guess_format
 
-from components import MD_EXTRAS  # noqa: E402
+from components import MD_EXTRAS
 
 
 # --- IQ source -------------------------------------------------------------------
@@ -153,7 +151,7 @@ def test_function_source_errors():
     with pytest.raises(FileNotFoundError):
         function_source("nope.py::f")
     with pytest.raises(LookupError):
-        function_source("common/ca_code.py::does_not_exist")
+        function_source("bassanite/ca_code.py::does_not_exist")
     with pytest.raises(LookupError):
         function_source("bassanite/tracking.py::NoSuchClass.update")
 

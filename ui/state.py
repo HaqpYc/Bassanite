@@ -6,17 +6,14 @@ tab shows up in the others.
 """
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from bassanite.constants import L1_HZ
+from bassanite.iq_loader import BYTES_PER_SAMPLE, normalize_format
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from common.iq_loader import BYTES_PER_SAMPLE, normalize_format  # noqa: E402
-
-GPS_L1_HZ = 1575.42e6
+GPS_L1_HZ = L1_HZ
 DEFAULT_FS = 4e6
 DEFAULT_RECORDING = REPO_ROOT / "recordings" / "capture.bin"
 

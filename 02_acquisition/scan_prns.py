@@ -46,22 +46,18 @@ Example:
 """
 import argparse
 import os
-import sys
 
 import numpy as np
 
-# Make the repo-root `common` package importable regardless of CWD.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
-from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
+from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,
                                    DEFAULT_MS, DEFAULT_THRESHOLD, persistence, scan,
                                    scan_seconds, write_results)
-from bassanite.provenance import write_meta                    # noqa: E402
-from bassanite.results import scan_csv                         # noqa: E402
-from common.iq_loader import load_iq                           # noqa: E402
+from bassanite.provenance import write_meta
+from bassanite.results import scan_csv
+from bassanite.iq_loader import load_iq
 
 
 def print_table(results, threshold):

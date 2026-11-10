@@ -1,6 +1,6 @@
 ---
 title: Gains and antenna power: the receive chain
-code: common/hackrf.py::bias_tee_check
+code: bassanite/hackrf.py::bias_tee_check
 ---
 ## Intuition
 

@@ -17,12 +17,10 @@ gain. Used by the web UI's Signal tab.
 No dependencies beyond numpy.
 """
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common.iq_loader import BYTES_PER_SAMPLE, load_iq, normalize_format  # noqa: E402
+from bassanite.iq_loader import BYTES_PER_SAMPLE, load_iq, normalize_format
 
 INT8_MIN, INT8_MAX = -128, 127      # HackRF ADC codes, as written by hackrf_transfer
 

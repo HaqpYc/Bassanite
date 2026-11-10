@@ -12,7 +12,7 @@ from explain_values import current_values
 from stages import STAGES, Stage, rel_path
 from state import state
 
-from bassanite.results import results_dir  # noqa: E402,I001  (state set sys.path)
+from bassanite.results import results_dir
 
 # `latex` renders $...$ and $$...$$ to MathML (via latex2mathml), so math works
 # offline without a JavaScript library.

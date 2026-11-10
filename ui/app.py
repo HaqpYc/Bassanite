@@ -27,7 +27,7 @@ from tabs.capture import CapturePanel
 from tabs.signal import SignalTab
 from tabs.tracking import TrackingTab, stop_all_runs
 
-from common.hackrf import stop_all  # noqa: E402  (repo root is on sys.path via state)
+from bassanite.hackrf import stop_all
 
 HELP = """
 **How to use Bassanite**

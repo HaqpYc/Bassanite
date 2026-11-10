@@ -9,7 +9,7 @@ from nicegui.testing import User
 
 import tabs.acquisition as acq
 from bassanite.acquisition import acquire_prn, cn0_from_peak, code_drift_chips_per_s
-from common.ca_code import CODE_LENGTH, G2_TAPS, ca_code, register_states
+from bassanite.ca_code import CODE_LENGTH, G2_TAPS, ca_code, register_states
 from state import IQSource, state
 from bassanite.synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps, write_int8
 

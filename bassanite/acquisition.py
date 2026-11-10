@@ -15,14 +15,12 @@ The detection metric is peak/mean of the accumulated surface (pure noise gives
 02_acquisition/NOTES.md for the full explanation and the verification method.
 """
 import csv
-import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common.ca_code import CHIP_RATE, CODE_LENGTH, upsample_code  # noqa: E402
-from common.iq_loader import load_iq, open_iq  # noqa: E402
+from bassanite.ca_code import upsample_code
+from bassanite.constants import CHIP_RATE, CODE_LENGTH, L1_HZ  # noqa: F401  (L1_HZ re-exported)
+from bassanite.iq_loader import load_iq, open_iq
 
 DEFAULT_DOP_RANGE_HZ = 10000.0
 DEFAULT_DOP_STEP_HZ = 250.0
@@ -33,7 +31,6 @@ FINE_STEP_HZ = 10.0       # grid of the refined Doppler handed to tracking
 # Doppler: 10 ms misses by up to 74 Hz on a weak satellite (PRN 15, peak/mean 6.3),
 # 40 ms by at most 29 Hz, which a 12 Hz carrier loop pulls in at once.
 FINE_MS = 40
-L1_HZ = 1575.42e6
 
 # scan_results.csv, the file stage 03 reads its seeds from, and its columns.
 SCAN_CSV = "scan_results.csv"

@@ -8,12 +8,12 @@ from dataclasses import dataclass, replace
 import numpy as np
 from nicegui import run, ui
 
-from state import GPS_L1_HZ, IQSource, state  # first: puts the repo root on sys.path
+from state import GPS_L1_HZ, IQSource, state
 
-from common.signal_view import (adc_stats, burst_stats, code_histogram, psd,  # noqa: E402,I001
+from bassanite.signal_view import (adc_stats, burst_stats, code_histogram, psd,  # noqa: I001
                                 raw_samples, waterfall)
-from components import explain_panel  # noqa: E402
-from plots import PLOT_CONFIG, empty_figure as _empty_figure, layout as _layout  # noqa: E402
+from components import explain_panel
+from plots import PLOT_CONFIG, empty_figure as _empty_figure, layout as _layout
 
 CA_HALF_WIDTH_HZ = 1.023e6      # GPS C/A main lobe: +/- one chip rate around L1
 TIME_SAMPLES = 200              # samples shown in the time plot

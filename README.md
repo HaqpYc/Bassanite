@@ -30,22 +30,29 @@ Each stage's algorithm lives in the importable [`bassanite/`](bassanite/) packag
 (used by both the command-line scripts in the numbered folders and the web UI):
 - [`bassanite/acquisition.py`](bassanite/acquisition.py) — stage 02 search.
 - [`bassanite/tracking.py`](bassanite/tracking.py) — stage 03 loops, bit sync, C/N0.
+- [`bassanite/results.py`](bassanite/results.py) — results go to
+  `results/<recording>/<stage>/` (git-ignored), one folder per recording.
 - [`bassanite/provenance.py`](bassanite/provenance.py) — each result file gets a
   `<name>.meta.json` recording which recording and settings produced it.
+- [`bassanite/synthetic.py`](bassanite/synthetic.py) — synthetic recordings with known
+  satellites, for tests and for the UI.
 
-Shared, reusable pieces live in [`common/`](common/):
-- [`common/ca_code.py`](common/ca_code.py) — GPS L1 C/A Gold-code (PRN) generator.
-- [`common/iq_loader.py`](common/iq_loader.py) — load HackRF int8 / gr_complex IQ.
-- [`common/signal_view.py`](common/signal_view.py) — spectrum, waterfall, ADC levels,
+Lower-level pieces, in the same package:
+- [`bassanite/ca_code.py`](bassanite/ca_code.py) — GPS L1 C/A Gold-code (PRN) generator.
+- [`bassanite/iq_loader.py`](bassanite/iq_loader.py) — load HackRF int8 / gr_complex IQ.
+- [`bassanite/signal_view.py`](bassanite/signal_view.py) — spectrum, waterfall, ADC levels,
   interference bursts.
-- [`common/hackrf.py`](common/hackrf.py) — record from a HackRF (receive only),
+- [`bassanite/hackrf.py`](bassanite/hackrf.py) — record from a HackRF (receive only),
   bias-tee check.
 
 ## Quick start
 
 ```bash
+# once: install the package (editable) into your environment, with the plot extras
+pip install -e ".[plots]"
+
 # verify the PRN-code generator (textbook self-test)
-python common/ca_code.py
+python -m bassanite.ca_code
 
 # scan all 32 PRNs in an IQ capture
 python 02_acquisition/scan_prns.py
@@ -57,7 +64,7 @@ python 03_tracking/track.py
 Both `scan_prns.py` and `track.py` read a raw IQ recording (see
 [`01_data_acquisition/`](01_data_acquisition/) for how to capture one with a HackRF
 One — recordings aren't checked into this repo, so bring your own). Requires
-Python 3 + numpy + matplotlib. Runs natively on Windows; no WSL2 needed for offline
+Python 3.10+, numpy and matplotlib (`pip install -e ".[plots]"`). Runs natively on Windows; no WSL2 needed for offline
 analysis.
 
 ## Web UI (in progress)

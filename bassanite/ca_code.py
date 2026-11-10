@@ -47,8 +47,7 @@ G2_TAPS = {1: (2, 6), 2: (3, 7), 3: (4, 8), 4: (5, 9), 5: (1, 9), 6: (2, 10),
            23: (1, 3), 24: (4, 6), 25: (5, 7), 26: (6, 8), 27: (7, 9),
            28: (8, 10), 29: (1, 6), 30: (2, 7), 31: (3, 8), 32: (4, 9)}
 
-CODE_LENGTH = 1023          # chips per C/A code period
-CHIP_RATE = 1.023e6         # chips per second
+from bassanite.constants import CHIP_RATE, CODE_LENGTH  # noqa: F401  (re-exported)
 CODE_PERIOD = 1e-3          # seconds (1 ms)
 
 # Feedback taps (1-indexed stages) of the two 10-stage shift registers.

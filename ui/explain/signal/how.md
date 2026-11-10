@@ -1,6 +1,6 @@
 ---
 title: From radio wave to IQ samples
-code: common/iq_loader.py::load_iq
+code: bassanite/iq_loader.py::load_iq
 ---
 ## Intuition
 

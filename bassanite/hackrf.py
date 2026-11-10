@@ -28,7 +28,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -38,11 +37,11 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common.iq_loader import load_iq  # noqa: E402
-from common.signal_view import burst_stats, psd  # noqa: E402
+from bassanite.constants import L1_HZ
+from bassanite.iq_loader import load_iq
+from bassanite.signal_view import burst_stats, psd
 
-GPS_L1_HZ = 1575.42e6
+GPS_L1_HZ = L1_HZ
 LNA_STEPS = tuple(range(0, 41, 8))       # HackRF IF ("LNA") gain, dB
 VGA_STEPS = tuple(range(0, 63, 2))       # HackRF baseband ("VGA") gain, dB
 SAMPLE_RATES = (2e6, 4e6, 8e6, 10e6)

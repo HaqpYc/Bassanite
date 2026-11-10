@@ -1,6 +1,6 @@
 ---
 title: Waterfall: the spectrum over time
-code: common/signal_view.py::waterfall
+code: bassanite/signal_view.py::waterfall
 ---
 ## Intuition
 

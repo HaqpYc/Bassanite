@@ -10,28 +10,28 @@ from pathlib import Path
 import numpy as np
 from nicegui import run, ui
 
-from state import IQSource, state  # first: puts the repo root on sys.path
+from state import IQSource, state
 
-import bassanite.acquisition as backend  # noqa: E402,I001
-from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
+import bassanite.acquisition as backend  # noqa: I001
+from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,
                                    DEFAULT_MS, DEFAULT_THRESHOLD, acquire_prn, cn0_from_peak,
                                    FINE_MS, correlation_surface, despread, read_results,
                                    refine_doppler, scan, scan_seconds, seconds_needed,
                                    write_results)
-from bassanite.provenance import read_meta, write_meta  # noqa: E402
-from bassanite.results import scan_csv  # noqa: E402
-from bassanite.synthetic import CODE_PHASE_SAMP as SYN_CODE_PHASE  # noqa: E402
-from bassanite.synthetic import DOPPLER as SYN_DOPPLER  # noqa: E402
-from bassanite.synthetic import FS as SYN_FS  # noqa: E402
-from bassanite.synthetic import PRN as SYN_PRN  # noqa: E402
-from bassanite.synthetic import read_truth, synthetic_gps  # noqa: E402
-from common.signal_view import psd  # noqa: E402
-from common.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,  # noqa: E402
+from bassanite.provenance import read_meta, write_meta
+from bassanite.results import scan_csv
+from bassanite.synthetic import CODE_PHASE_SAMP as SYN_CODE_PHASE
+from bassanite.synthetic import DOPPLER as SYN_DOPPLER
+from bassanite.synthetic import FS as SYN_FS
+from bassanite.synthetic import PRN as SYN_PRN
+from bassanite.synthetic import read_truth, synthetic_gps
+from bassanite.signal_view import psd
+from bassanite.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,
                             REGISTER_STAGES, ca_code, register_states)
-from common.iq_loader import load_iq  # noqa: E402
-from components import explain_panel  # noqa: E402
-from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure  # noqa: E402
-from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording  # noqa: E402
+from bassanite.iq_loader import load_iq
+from components import explain_panel
+from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure
+from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording
 
 PRNS = tuple(range(1, 33))
 SURFACE_COLUMNS = 512      # code-phase columns sent to the browser for the surface

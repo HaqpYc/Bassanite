@@ -1,13 +1,9 @@
-"""Tests for common/signal_view.py (the Signal tab's numbers)."""
-import sys
-from pathlib import Path
-
+"""Tests for bassanite/signal_view.py (the Signal tab's numbers)."""
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from common.signal_view import (adc_stats, code_histogram, psd,  # noqa: E402
-                                raw_samples, recording_seconds, waterfall)
+from bassanite.signal_view import (adc_stats, code_histogram, psd, raw_samples,
+                                   recording_seconds, waterfall)
 
 FS = 4e6
 
@@ -89,7 +85,7 @@ def test_waterfall_shape_and_duration(tmp_path):
 
 
 def test_open_iq_matches_load_iq(tmp_path):
-    from common.iq_loader import load_iq, open_iq
+    from bassanite.iq_loader import load_iq, open_iq
     rng = np.random.default_rng(1)
     raw = rng.integers(-60, 60, size=2 * 50_000).astype(np.int8)
     raw[0::2] += 5                                          # a DC offset to remove

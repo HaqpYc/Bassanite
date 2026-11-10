@@ -1,3 +1,6 @@
+# The same dependencies are declared in pyproject.toml; the bassanite package
+# itself is installed with: pip install -e ".[plots,ui,test]"
+
 # Signal-processing pipeline
 numpy>=2.0
 matplotlib>=3.8
@@ -6,6 +9,6 @@ matplotlib>=3.8
 nicegui>=4.0,<5
 latex2mathml>=3.77     # renders the math in the explanation panels, offline
 
-# Tests (python -m pytest ui)
+# Tests (python -m pytest tests; python -m pytest ui)
 pytest>=8
 pytest-asyncio>=0.24

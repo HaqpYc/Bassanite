@@ -16,17 +16,14 @@ its sign, summed over aligned 20 ms groups, gives the navigation bits.
 See 03_tracking/NOTES.md for the full explanation and what made the loops lock.
 """
 import csv
-import os
-import sys
 from dataclasses import dataclass
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bassanite.acquisition import read_results, refine_doppler  # noqa: E402
-from common.ca_code import CHIP_RATE, CODE_LENGTH, ca_code  # noqa: E402
+from bassanite.acquisition import read_results, refine_doppler
+from bassanite.ca_code import ca_code
+from bassanite.constants import CHIP_RATE, CODE_LENGTH, L1_HZ
 
-L1_HZ = 1575.42e6                 # GPS L1 carrier (for carrier-aiding the code loop)
 MS_PER_BIT = 20                   # 20 ms per 50 bps navigation bit
 PROMPT_RATE_HZ = 1000             # one prompt sample per 1 ms code period
 LOCK_QI_MAX = 0.3                 # |Q|/|I| below this = carrier phase-locked
@@ -235,7 +232,7 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     epochs actually tracked.
 
     `x` is the complex baseband signal: an array, or an IQReader
-    (common/iq_loader.open_iq), since the loop only slices it and takes len().
+    (bassanite/iq_loader.open_iq), since the loop only slices it and takes len().
 
     Parameters
     ----------

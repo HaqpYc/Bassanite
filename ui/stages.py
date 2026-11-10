@@ -8,12 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from state import REPO_ROOT, IQSource  # first: sets sys.path
+from state import REPO_ROOT, IQSource
 
-from bassanite.acquisition import read_results  # noqa: E402
-from bassanite.provenance import read_meta, same_recording  # noqa: E402
-from bassanite.results import recordings_with_results, results_dir  # noqa: E402
-from bassanite.tracking import read_summary  # noqa: E402
+from bassanite.acquisition import read_results
+from bassanite.provenance import read_meta, same_recording
+from bassanite.results import recordings_with_results, results_dir
+from bassanite.tracking import read_summary
 
 MIN_SATS_FOR_FIX = 4
 
@@ -34,7 +34,7 @@ class Stage:
 STAGES: tuple[Stage, ...] = (
     Stage("signal", 1, "Signal", "Antenna → raw IQ samples", True,
           "IQ samples: complex numbers at 4 million per second, scaled to about ±1, "
-          "DC offset removed (common/iq_loader.py)."),
+          "DC offset removed (bassanite/iq_loader.py)."),
     Stage("acquisition", 2, "Find satellites", "Which satellites are overhead?", True,
           "For each satellite found: its PRN, code phase and Doppler (refined to about "
           "20 Hz), the starting point for tracking.",

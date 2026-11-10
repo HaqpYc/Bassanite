@@ -58,15 +58,15 @@ command (frequency, sample rate, bias-tee, gains, duration).
 
 ## Loading IQ in code
 All stages load recordings through the shared helper
-[`../common/iq_loader.py`](../common/iq_loader.py), which handles both formats,
+[`../bassanite/iq_loader.py`](../bassanite/iq_loader.py), which handles both formats,
 scales to ~±1, and removes the DC offset:
 
 ```python
-from common.iq_loader import load_iq
+from bassanite.iq_loader import load_iq
 x = load_iq("recordings/capture.bin", fmt="int8", fs=4e6, seconds=0.02)
 ```
 
 Quick inspection:
 ```bash
-python common/iq_loader.py --iq recordings/capture.bin --seconds 0.1
+python bassanite/iq_loader.py --iq recordings/capture.bin --seconds 0.1
 ```

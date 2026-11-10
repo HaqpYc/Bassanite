@@ -139,7 +139,7 @@ files are the starting material.
   - complex baseband and mixing, `x(t) = I + jQ`
   - complex sampling and Nyquist
   - the noise-floor budget above
-  - DC-offset removal (as `common/iq_loader.py` does)
+  - DC-offset removal (as `bassanite/iq_loader.py` does)
 
 ### 2. Find satellites (stage 02, acquisition)
 *Message: "the signal is buried in noise. Each satellite is found by its unique code."*
@@ -304,7 +304,7 @@ always cuts one. Subframes 1, 2 and 3 are each complete at least once only from
 | B4 ✅ | **Define each file format in one place**, with save and load next to the algorithm in `bassanite/` | `scan_results.csv` has three readers (`bassanite/acquisition.py`, `bassanite/tracking.py`, `ui/stages.py`). The track `.npz` is written in `03_tracking/track.py` and read in `ui/tabs/tracking.py`. The summary CSV is written in `track.py` and read in two UI files. Stage 04 would be one more reader |
 | B5 ✅ | **Move receiver algorithms out of the UI:** `persistence()` and `refine_doppler()` from `ui/tabs/acquisition.py` into `bassanite/acquisition.py`, with a command-line option for the persistence check. Make the refined Doppler part of what acquisition hands over | Tracking has its own, different `fine_doppler()`, so there are two fine-Doppler searches. The persistence check is how a weak detection is confirmed, yet only the UI can run it |
 | B6 ✅ | **Split `track_prn` into the blocks of the textbook diagram:** correlators, discriminators, loop filter, oscillator, with one `step()` per satellite and per millisecond | The loop-filter update is written inline twice, so the "loops" panel's Code tab shows only `calc_loop_coef`, not the equation its Math tab explains. Named blocks also allow the "break it" switches (U4) and tracking every satellite in one pass over the file |
-| B7 | **Packaging** (low priority): a `pyproject.toml` with an editable install, `common/` folded into `bassanite/`, backend tests out of `ui/tests/` | 11 `sys.path.insert` calls, 43 `noqa: E402` markers, and the L1 frequency defined four times |
+| B7 ✅ | **Packaging** (low priority): a `pyproject.toml` with an editable install, `common/` folded into `bassanite/`, backend tests out of `ui/tests/` | 11 `sys.path.insert` calls, 43 `noqa: E402` markers, and the L1 frequency defined four times |
 
 ### Explanations and UI
 

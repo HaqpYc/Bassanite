@@ -11,14 +11,14 @@ from pathlib import Path
 import numpy as np
 from nicegui import context, run, ui
 
-from state import REPO_ROOT, IQSource, state  # first: puts the repo root on sys.path
+from state import REPO_ROOT, IQSource, state
 
-from common.hackrf import (DEVICE_LOCK, LNA_STEPS, SAMPLE_RATES, Capture,  # noqa: E402,I001
+from bassanite.hackrf import (DEVICE_LOCK, LNA_STEPS, SAMPLE_RATES, Capture,  # noqa: I001
                            CaptureSettings, DeviceInfo, bias_tee_check, capture_blocking,
                            device_info, recording_path, write_sidecar)
-from components import explain_panel  # noqa: E402
-from plots import figure  # noqa: E402
-from tabs.signal import burst_message  # noqa: E402
+from components import explain_panel
+from plots import figure
+from tabs.signal import burst_message
 
 RECORDINGS_DIR = REPO_ROOT / "recordings"
 PREVIEW_SECONDS = 0.1

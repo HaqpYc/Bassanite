@@ -8,3 +8,6 @@ __pycache__/
 # Stage results: one folder per recording, regenerated from the recordings
 # (see bassanite/results.py).
 results/
+
+# Built by the editable install (pip install -e .)
+*.egg-info/

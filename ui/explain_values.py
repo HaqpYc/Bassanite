@@ -11,13 +11,13 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 
-from state import DEFAULT_FS, state  # first: puts the repo root on sys.path
+from state import DEFAULT_FS, state
 
-from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402
+from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,
                                    DEFAULT_MS, DEFAULT_THRESHOLD, doppler_bins,
                                    noise_peak_over_mean)
-from bassanite.provenance import read_meta  # noqa: E402
-from bassanite.results import scan_csv  # noqa: E402
+from bassanite.provenance import read_meta
+from bassanite.results import scan_csv
 
 TIME_SAMPLES = 200          # samples in the Signal tab's time plot
 STRONG_CN0_DBHZ = 43        # the strongest satellite of the bundled recording

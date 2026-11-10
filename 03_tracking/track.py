@@ -30,7 +30,7 @@ web UI); this script is their command line.
 
 HOW IT CONNECTS TO THE OTHER STAGES (the file is the interface)
 ---------------------------------------------------------------
-  * FROM stage 01: samples come through common/iq_loader.open_iq, which applies
+  * FROM stage 01: samples come through bassanite/iq_loader.open_iq, which applies
     the same conditioning as stage 02's load_iq but reads the file block by block --
     so a bundled recording and a fresh live `hackrf_transfer` capture are handled
     identically (just pass --iq/--format/--fs), whatever their length.
@@ -44,7 +44,7 @@ HOW IT CONNECTS TO THE OTHER STAGES (the file is the interface)
 
 This productionizes the proven prototype in
 issues/clock_drift/solution_clean_capture/mini_gps_rx.py (its track()), reusing the
-validated Gold-code generator in ../common/ca_code.py instead of a private copy.
+validated Gold-code generator in ../bassanite/ca_code.py instead of a private copy.
 
 Example:
   python 03_tracking/track.py                       # all detected PRNs in capture.bin
@@ -56,20 +56,17 @@ import sys
 
 import numpy as np
 
-# Make the repo-root packages importable regardless of CWD.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
-from bassanite.provenance import write_meta                    # noqa: E402
-from bassanite.results import scan_csv, tracking_dir           # noqa: E402
-from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
+from bassanite.provenance import write_meta
+from bassanite.results import scan_csv, tracking_dir
+from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,
                                 MS_PER_BIT, PROMPT_RATE_HZ, SUMMARY_CSV, read_seeds,
                                 save_track, summarize, summary_row, track_file_name,
                                 track_prn, write_summary)
-from common.ca_code import CODE_LENGTH                         # noqa: E402
-from common.iq_loader import open_iq                           # noqa: E402
+from bassanite.ca_code import CODE_LENGTH
+from bassanite.iq_loader import open_iq
 
 
 def write_plot(out_dir, prn, fs, track, cn0):

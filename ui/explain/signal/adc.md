@@ -1,6 +1,6 @@
 ---
 title: ADC levels: is the gain right?
-code: common/signal_view.py::adc_stats
+code: bassanite/signal_view.py::adc_stats
 ---
 ## Intuition
 

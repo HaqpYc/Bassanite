@@ -1,6 +1,6 @@
 ---
 title: Spectrum: where the energy is
-code: common/signal_view.py::psd
+code: bassanite/signal_view.py::psd
 ---
 ## Intuition
 

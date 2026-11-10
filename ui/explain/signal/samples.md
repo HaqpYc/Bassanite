@@ -1,6 +1,6 @@
 ---
 title: The samples themselves: why they look like noise
-code: common/signal_view.py::raw_samples
+code: bassanite/signal_view.py::raw_samples
 ---
 ## Intuition
 

@@ -1,6 +1,6 @@
 ---
 title: Why multiplying by the code makes the satellite appear
-code: bassanite/acquisition.py::despread, common/signal_view.py::psd
+code: bassanite/acquisition.py::despread, bassanite/signal_view.py::psd
 ---
 ## Intuition
 

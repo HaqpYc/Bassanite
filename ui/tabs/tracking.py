@@ -14,20 +14,20 @@ from pathlib import Path
 import numpy as np
 from nicegui import background_tasks, context, run, ui
 
-from state import REPO_ROOT, IQSource, state  # first: puts the repo root on sys.path
+from state import REPO_ROOT, IQSource, state
 
-import tabs.acquisition as acquisition  # noqa: E402  (its results_csv is the seed file)
-from bassanite.provenance import read_meta  # noqa: E402,I001
-from bassanite.results import tracking_dir  # noqa: E402
-from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
+import tabs.acquisition as acquisition  # its results_csv is the seed file
+from bassanite.provenance import read_meta  # noqa: I001
+from bassanite.results import tracking_dir
+from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,
                                 LOCK_QI_MAX, MIN_SECONDS_FOR_EPHEMERIS, MS_PER_BIT,
                                 SUMMARY_CSV, TrackOptions, bit_sync_scores,
                                 read_summary, summarize, track_file_name, track_prn)
-from bassanite.tracking import load_track as read_track_file  # noqa: E402
-from common.iq_loader import load_iq  # noqa: E402
-from components import explain_panel  # noqa: E402
-from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure, layout  # noqa: E402
-from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording  # noqa: E402
+from bassanite.tracking import load_track as read_track_file
+from bassanite.iq_loader import load_iq
+from components import explain_panel
+from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure, layout
+from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording
 
 TRACK_SCRIPT = REPO_ROOT / "03_tracking" / "track.py"
 RESULT_GLOBS = ("track_PRN*.npz", "track_PRN*.png", "tracking_summary.csv",
