@@ -4,7 +4,7 @@ import asyncio
 from nicegui import ui
 from nicegui.testing import User
 
-from components import EXPLAIN_MARKER
+from components import EXPLAIN_MARKER, INTUITION_MARKER
 from state import state
 
 
@@ -65,3 +65,26 @@ async def test_mode_toggle_drives_global_state(user: User) -> None:
     mode_toggle.set_value("expert")
     assert state.expert
     state.mode = "beginner"
+
+
+async def test_beginners_see_the_intuition_without_opening_anything(user: User) -> None:
+    """U1: the intuition is on the page in Beginner mode, the math stays folded."""
+    state.mode, state.show_math = "beginner", False
+    try:
+        await user.open("/")
+        cards = list(user.find(kind=ui.card, marker=INTUITION_MARKER).elements)
+        assert len(cards) >= 10
+
+        def shown(card) -> bool:                    # the card and its mode column
+            return card.visible and card.parent_slot.parent.visible
+
+        await asyncio.sleep(0.3)                    # bindings settle
+        assert all(shown(c) for c in cards)
+        assert not any(p.value for p in user.find(kind=ui.expansion,
+                                                  marker=EXPLAIN_MARKER).elements)
+
+        state.mode = "expert"                       # the inline text goes away
+        await asyncio.sleep(0.3)
+        assert not any(shown(c) for c in cards)
+    finally:
+        state.mode = "beginner"

@@ -41,28 +41,54 @@ def md(text: str) -> ui.markdown:
     return ui.markdown(text, extras=MD_EXTRAS, sanitize=False).classes("w-full bassanite-md")
 
 
-def explain_panel(stage_key: str, name: str) -> None:
-    """One "How is this computed?" panel with Intuition / Math / Code tabs.
+INTUITION_MARKER = "explain-intuition"
 
-    Flipping the global "Show the math" switch opens or closes every panel (see
-    set_all_panels); each panel can also be opened on its own. (A binding would
-    not do: it forces the panel back to the switch's value every 0.1 s.)
+
+def explain_panel(stage_key: str, name: str) -> None:
+    """One explanation panel: Intuition, Math and Code.
+
+    Beginner mode shows the Intuition text on the page, next to its plot, with the
+    Math and Code tabs in a "How is this computed?" expansion below it. Expert mode
+    folds all three into the expansion. Flipping the global "Show the math" switch
+    opens or closes every expansion (see set_all_panels); each can also be opened
+    on its own. (A binding would not do: it forces the panel back to the switch's
+    value every 0.1 s.)
     """
     panel = load_panel(stage_key, name)
-    with ui.expansion(panel.title, caption="How is this computed?", icon="functions",
+    with ui.column().classes("w-full gap-0") \
+            .bind_visibility_from(state, "mode", value="beginner"):
+        if panel.intuition:
+            with ui.card().classes("w-full bg-amber-1").props("flat bordered") \
+                    .mark(INTUITION_MARKER):
+                with ui.row().classes("items-center gap-2 no-wrap"):
+                    ui.icon("lightbulb", color="amber-9")
+                    ui.label(panel.title).classes("font-bold")
+                md(panel.intuition)
+        _expansion(panel, "The math and the code", ("math", "code"))
+    with ui.column().classes("w-full gap-0") \
+            .bind_visibility_from(state, "mode", value="expert"):
+        _expansion(panel, panel.title, ("intuition", "math", "code"))
+
+
+_TABS = {"intuition": ("Intuition", "lightbulb"), "math": ("Math", "functions"),
+         "code": ("Code", "code")}
+
+
+def _expansion(panel, title: str, tabs_shown: tuple[str, ...]) -> None:
+    with ui.expansion(title, caption="How is this computed?", icon="functions",
                       value=state.show_math) \
             .classes("w-full border rounded-lg").mark(EXPLAIN_MARKER):
         with ui.tabs().props("dense align=left no-caps") as tabs:
-            ui.tab("intuition", "Intuition", icon="lightbulb")
-            ui.tab("math", "Math", icon="functions")
-            ui.tab("code", "Code", icon="code")
-        with ui.tab_panels(tabs, value="intuition").classes("w-full"):
-            with ui.tab_panel("intuition"):
-                md(panel.intuition)
-            with ui.tab_panel("math"):
-                md(panel.math)
-            with ui.tab_panel("code"):
-                _code_view(panel.code_refs)
+            for key in tabs_shown:
+                label, icon = _TABS[key]
+                ui.tab(key, label, icon=icon)
+        with ui.tab_panels(tabs, value=tabs_shown[0]).classes("w-full"):
+            for key in tabs_shown:
+                with ui.tab_panel(key):
+                    if key == "code":
+                        _code_view(panel.code_refs)
+                    else:
+                        md(panel.intuition if key == "intuition" else panel.math)
 
 
 def _code_view(code_refs: tuple[str, ...]) -> None:
