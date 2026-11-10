@@ -1,6 +1,6 @@
 ---
 title: The code loop: early, prompt and late
-code: bassanite/tracking.py::dll_error
+code: bassanite/tracking.py::correlate, bassanite/tracking.py::dll_error
 ---
 ## Intuition
 

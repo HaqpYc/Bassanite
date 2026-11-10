@@ -18,6 +18,7 @@ See 03_tracking/NOTES.md for the full explanation and what made the loops lock.
 import csv
 import os
 import sys
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -82,12 +83,150 @@ def dll_error(ie, qe, il, ql):
     return (e_mag - l_mag) / (e_mag + l_mag + 1e-12)
 
 
+def atan2_error(ip, qp):
+    """The WRONG carrier discriminator, kept for the "break it" switches: atan2
+    sees the 180 deg data flips as phase jumps of half a cycle, so the loop chases
+    every bit edge instead of the carrier."""
+    return np.arctan2(qp, ip) / (2 * np.pi)
+
+
+@dataclass(frozen=True)
+class TrackOptions:
+    """Switches that re-create the bugs described in 03_tracking/NOTES.md, so the
+    UI can show what each decision protects against. The defaults are correct."""
+    discriminator: str = "costas"      # "atan2": chases every data-bit flip
+    carrier_aiding: bool = True        # False: code rate ignores the carrier Doppler
+    integer_period: bool = True        # False: step a rounded 4000 samples per period
+    phase_before_update: bool = True   # False: advance the carrier phase with the
+    #                                    frequency the loop filter just changed
+
+
+def correlate(block, fs, carr_f, carr_phase, rem_code_phase, code_step, ca,
+              spacing=0.5):
+    """The correlators: Early, Prompt and Late sums over one code period.
+
+    Wipes the carrier off `block` (a local oscillator at `carr_f`, starting at
+    phase `carr_phase`) and multiplies by three copies of the code replica, half a
+    chip early, on time and late. The replica's code phase starts at
+    `rem_code_phase` chips and advances `code_step` chips per sample. Returns the
+    three complex sums (E, P, L).
+    """
+    n = np.arange(len(block))
+    bb = block * np.exp(-1j * (2 * np.pi * carr_f * n / fs + carr_phase))
+    tcode = rem_code_phase + n * code_step              # code phase (chips) per sample
+    early = ca[(np.floor(tcode - spacing).astype(int)) % CODE_LENGTH]
+    prompt = ca[(np.floor(tcode).astype(int)) % CODE_LENGTH]
+    late = ca[(np.floor(tcode + spacing).astype(int)) % CODE_LENGTH]
+    return bb @ early, bb @ prompt, bb @ late
+
+
+class LoopFilter:
+    """The loop filter both loops use: a 2nd-order filter, run once per period T.
+
+        u_k = u_{k-1} + (tau2 / tau1) (e_k - e_{k-1}) + (T / tau1) e_k
+
+    It reacts to the latest error (to correct quickly) and to the sum of past
+    errors (to remember a steady frequency offset). `bw` sets how fast.
+    """
+
+    def __init__(self, bw, zeta, k, period=1e-3):
+        self.tau1, self.tau2 = calc_loop_coef(bw, zeta, k)
+        self.period = period
+        self.u = 0.0            # the correction (Hz for the carrier, chips/s for the code)
+        self.prev = 0.0         # e_{k-1}
+
+    def update(self, err):
+        self.u += (self.tau2 / self.tau1) * (err - self.prev) + err * (self.period / self.tau1)
+        self.prev = err
+        return self.u
+
+
+class ChannelTracker:
+    """One satellite's tracking channel, advanced one 1 ms code period per step().
+
+    The blocks of the textbook diagram:
+      oscillators  carrier NCO (carr_f, carr_phase) and code NCO (code rate)
+      correlate()  wipe-off and Early/Prompt/Late correlators
+      costas_error() / dll_error()   the two discriminators
+      LoopFilter   one per loop, turning errors into NCO corrections
+    """
+
+    def __init__(self, prn, fs, code_phase_samp, doppler_hz, pll_bw=DEFAULT_PLL_BW,
+                 dll_bw=DEFAULT_DLL_BW, options=TrackOptions()):
+        self.ca = ca_code(prn)                             # +/-1 replica, length 1023
+        self.fs = fs
+        self.options = options
+        self.carr_freq_basis = float(doppler_hz)           # where the carrier loop starts
+        self.carr_f = self.carr_freq_basis                 # carrier NCO frequency (Hz)
+        self.carr_phase = 0.0                              # carrier NCO phase (rad)
+        # Loop filters (Kaplan/Borre damping 0.7); dll_bw = 0 freezes the code loop.
+        self.pll = LoopFilter(pll_bw, 0.7, 0.25)
+        self.dll = LoopFilter(dll_bw, 0.7, 1.0) if dll_bw > 0.0 else None
+        # Code NCO. Code phase is an integer sample pointer (n0) plus a leftover in
+        # CHIPS (rem_code_phase): each step processes exactly enough samples to
+        # finish one 1023-chip period, so no per-period rounding can accumulate.
+        self.n0 = int(round(code_phase_samp))
+        self.rem_code_phase = 0.0
+
+    def code_rate(self):
+        """Code NCO frequency (chips/s): nominal, carrier-aided, trimmed by the DLL."""
+        aiding = self.carr_f / L1_HZ if self.options.carrier_aiding else 0.0
+        return CHIP_RATE * (1.0 + aiding) - (self.dll.u if self.dll else 0.0)
+
+    def step(self, x):
+        """Track one code period of `x`. Returns this ms's outputs (a dict), or
+        None when `x` has no full period left."""
+        opt = self.options
+        code_step = self.code_rate() / self.fs              # chips advanced per sample
+        if opt.integer_period:
+            blksize = int(np.ceil((CODE_LENGTH - self.rem_code_phase) / code_step))
+        else:
+            blksize = int(round(self.fs * 1e-3))            # the old bug
+        if self.n0 + blksize + 2 >= len(x):
+            return None
+
+        e, p, late = correlate(x[self.n0:self.n0 + blksize], self.fs, self.carr_f,
+                               self.carr_phase, self.rem_code_phase, code_step, self.ca)
+        out = {"i_prompt": p.real, "q_prompt": p.imag, "doppler_hz": self.carr_f,
+               "code_phase_samp": self.n0 - self.rem_code_phase / code_step,
+               "i_early": e.real, "q_early": e.imag, "i_late": late.real,
+               "q_late": late.imag}
+
+        # Carrier NCO: advance the phase with the frequency ACTUALLY used to wipe off
+        # this block (before the loop filter changes it); otherwise the phase
+        # reference and the wipe-off disagree, which spins the prompt phasor.
+        if opt.phase_before_update:
+            self.carr_phase = (self.carr_phase + 2 * np.pi * self.carr_f * blksize / self.fs) \
+                % (2 * np.pi)
+
+        # Carrier loop: discriminator -> loop filter -> NCO frequency for the next ms.
+        disc = atan2_error if opt.discriminator == "atan2" else costas_error
+        carr_err = disc(p.real, p.imag)
+        self.carr_f = self.carr_freq_basis + self.pll.update(carr_err)
+        if not opt.phase_before_update:
+            self.carr_phase = (self.carr_phase + 2 * np.pi * self.carr_f * blksize / self.fs) \
+                % (2 * np.pi)
+
+        # Code loop: discriminator -> loop filter (read by code_rate() next ms).
+        code_err = 0.0
+        if self.dll is not None:
+            code_err = dll_error(e.real, e.imag, late.real, late.imag)
+            self.dll.update(code_err)
+        out["carr_err"], out["code_err"] = carr_err, code_err
+
+        # Code NCO: carry the fractional chip overshoot into the next period.
+        if opt.integer_period:
+            self.rem_code_phase += blksize * code_step - CODE_LENGTH
+        self.n0 += blksize
+        return out
+
+
 def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
               pll_bw=DEFAULT_PLL_BW, dll_bw=DEFAULT_DLL_BW, max_ms=None,
-              detail=False, progress=None, refine=True):
-    """Track one PRN with a Costas PLL + carrier-aided DLL.
+              detail=False, progress=None, refine=True, options=TrackOptions()):
+    """Track one PRN with a Costas PLL + carrier-aided DLL (a ChannelTracker).
 
-    Runs one iteration per 1 ms code period. Returns a dict of per-ms arrays
+    Runs one step per 1 ms code period. Returns a dict of per-ms arrays
     (i_prompt, q_prompt, doppler_hz, code_phase_samp) truncated to the number of
     epochs actually tracked.
 
@@ -108,109 +247,33 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     detail          : bool    also return the Early/Late correlators and both
                               discriminator outputs per ms (for plots)
     progress        : callable(done_ms, total_ms), called every second of signal
+    options         : TrackOptions, to re-create the bugs of NOTES.md on purpose
     """
-    ca = ca_code(prn)                                  # +/-1 replica, length 1023
-    spms_nominal = fs * 1e-3
-    n_ms = int(len(x) / spms_nominal) + 1
+    n_ms = int(len(x) / (fs * 1e-3)) + 1
     if max_ms is not None:
         n_ms = min(n_ms, max_ms)
 
-    PDI = 1e-3                                          # integration time per epoch
-    SPACING = 0.5                                       # Early/Late spacing (chips)
-    # Loop-filter coefficients (Kaplan/Borre damping 0.7).
-    tau1_c, tau2_c = calc_loop_coef(pll_bw, 0.7, 0.25)
-    use_dll = dll_bw > 0.0
-    tau1_d, tau2_d = calc_loop_coef(dll_bw, 0.7, 1.0) if use_dll else (1.0, 0.0)
-
     # Sharpen a coarse acquisition Doppler so the PLL can pull in.
-    carr_freq_basis = (refine_doppler(x, fs, prn, doppler_hz, code_phase_samp, PULL_IN_MS,
-                                      PULL_IN_SPAN_HZ, PULL_IN_STEP_HZ)
-                       if refine else float(doppler_hz))
-    carr_f = carr_freq_basis              # current carrier-Doppler estimate (Hz)
-    carr_phase = 0.0                      # carrier NCO phase carried across epochs
-    carr_nco = 0.0; old_carr_err = 0.0    # PLL filter state
-    code_nco = 0.0; old_code_err = 0.0    # DLL filter state (chips/s correction)
+    start_dop = (refine_doppler(x, fs, prn, doppler_hz, code_phase_samp, PULL_IN_MS,
+                                PULL_IN_SPAN_HZ, PULL_IN_STEP_HZ)
+                 if refine else float(doppler_hz))
+    channel = ChannelTracker(prn, fs, code_phase_samp, start_dop, pll_bw, dll_bw, options)
 
-    i_prompt = np.zeros(n_ms, dtype=np.float32)
-    q_prompt = np.zeros(n_ms, dtype=np.float32)
-    dopp = np.zeros(n_ms, dtype=np.float32)
-    code_start = np.zeros(n_ms, dtype=np.float64)
-    if detail:
-        el = {k: np.zeros(n_ms, dtype=np.float32) for k in DETAIL_KEYS}
-
-    # Code phase is tracked as an integer sample pointer (n0) plus a fractional
-    # leftover in CHIPS (rem_code_phase). Each epoch we process exactly enough
-    # samples to finish one 1023-chip period -- so n0 stays integer (no fractional
-    # sample-start error) and no per-period rounding can accumulate into a drift.
-    n0 = int(round(code_phase_samp))
-    rem_code_phase = 0.0
+    keys = ("i_prompt", "q_prompt", "doppler_hz", "code_phase_samp") \
+        + (DETAIL_KEYS if detail else ())
+    arrays = {k: np.zeros(n_ms, dtype=np.float64 if k == "code_phase_samp" else np.float32)
+              for k in keys}
     m = 0
     while m < n_ms:
-        # Code NCO: nominal chip rate, carrier-aided, trimmed by the DLL.
-        code_f = CHIP_RATE * (1.0 + carr_f / L1_HZ) - code_nco
-        code_step = code_f / fs                         # chips advanced per sample
-        blksize = int(np.ceil((CODE_LENGTH - rem_code_phase) / code_step))
-        if n0 + blksize + 2 >= len(x):
+        out = channel.step(x)
+        if out is None:
             break
-
-        n = np.arange(blksize)
-        # Carrier wipe-off (phase continuous across epochs).
-        bb = x[n0:n0 + blksize] * np.exp(-1j * (2 * np.pi * carr_f * n / fs + carr_phase))
-        # Code phase (chips) at each sample; Early/Prompt/Late at -/0/+0.5 chip.
-        tcode = rem_code_phase + n * code_step
-        early = ca[(np.floor(tcode - SPACING).astype(int)) % CODE_LENGTH]
-        prompt = ca[(np.floor(tcode).astype(int)) % CODE_LENGTH]
-        late = ca[(np.floor(tcode + SPACING).astype(int)) % CODE_LENGTH]
-        ie, qe = np.real(bb @ early), np.imag(bb @ early)
-        ip, qp = np.real(bb @ prompt), np.imag(bb @ prompt)
-        il, ql = np.real(bb @ late), np.imag(bb @ late)
-
-        i_prompt[m] = ip
-        q_prompt[m] = qp
-        dopp[m] = carr_f
-        code_start[m] = n0 - rem_code_phase / code_step   # fractional code-start sample
-
-        # Advance the carrier NCO phase with the frequency ACTUALLY used to wipe
-        # off this block (before the loop filter changes it) -- otherwise the phase
-        # reference and the wipe-off disagree, which spins the prompt phasor.
-        carr_phase = (carr_phase + 2 * np.pi * carr_f * blksize / fs) % (2 * np.pi)
-
-        # Carrier loop: Costas atan(Q/I) discriminator (cycles) -- blind to the
-        # 180 deg flips of the 50 bps data, unlike atan2. Updates carr_f for next.
-        carr_err = costas_error(ip, qp)
-        carr_nco += (tau2_c / tau1_c) * (carr_err - old_carr_err) + carr_err * (PDI / tau1_c)
-        old_carr_err = carr_err
-        carr_f = carr_freq_basis + carr_nco
-
-        # Code loop: normalized early-minus-late power discriminator (chips).
-        code_err = 0.0
-        if use_dll:
-            code_err = dll_error(ie, qe, il, ql)
-            code_nco += ((tau2_d / tau1_d) * (code_err - old_code_err)
-                         + code_err * (PDI / tau1_d))
-            old_code_err = code_err
-
-        if detail:
-            el["i_early"][m], el["q_early"][m] = ie, qe
-            el["i_late"][m], el["q_late"][m] = il, ql
-            el["carr_err"][m], el["code_err"][m] = carr_err, code_err
-
-        # Carry the fractional chip overshoot into the next period; step n0.
-        rem_code_phase += blksize * code_step - CODE_LENGTH
-        n0 += blksize
+        for k in keys:
+            arrays[k][m] = out[k]
         m += 1
         if progress is not None and m % PROGRESS_EVERY_MS == 0:
             progress(m, n_ms)
-
-    out = {
-        "i_prompt": i_prompt[:m],
-        "q_prompt": q_prompt[:m],
-        "doppler_hz": dopp[:m],
-        "code_phase_samp": code_start[:m],
-    }
-    if detail:
-        out.update({k: v[:m] for k, v in el.items()})
-    return out
+    return {k: v[:m] for k, v in arrays.items()}
 
 
 def bit_sync_scores(i_prompt):

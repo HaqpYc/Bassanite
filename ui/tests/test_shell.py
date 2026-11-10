@@ -130,3 +130,11 @@ def test_function_source_errors():
         function_source("nope.py::f")
     with pytest.raises(LookupError):
         function_source("common/ca_code.py::does_not_exist")
+    with pytest.raises(LookupError):
+        function_source("bassanite/tracking.py::NoSuchClass.update")
+
+
+def test_function_source_reads_methods():
+    src = function_source("bassanite/tracking.py::LoopFilter.update")
+    assert src.startswith("def update(self, err):")
+    assert function_source("bassanite/tracking.py::LoopFilter").startswith("class LoopFilter")

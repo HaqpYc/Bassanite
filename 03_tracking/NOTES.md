@@ -90,11 +90,18 @@ PRNs), `--pll-bw`/`--dll-bw`, `--seconds`/`--skip-seconds`, `--out-dir` (default
 `--progress` (machine-readable `PROGRESS k n prn done_ms total_ms` lines, used by the
 web UI's **Track** tab, which runs this script as a separate process).
 
-The loops and helpers named on this page (`track_prn()`, `calc_loop_coef()`,
-`bit_sync()`, `estimate_cn0()`) live in
+The loops and helpers named on this page live in
 [`../bassanite/tracking.py`](../bassanite/tracking.py); `track.py` is the command
-line. The two discriminators are their own small functions (`costas_error()`,
-`dll_error()`), and `bit_sync_scores()` gives the energy of all 20 bit-edge offsets.
+line. The code follows the blocks of the textbook diagram: `correlate()` (carrier
+wipe-off and the Early/Prompt/Late correlators), the two discriminators
+(`costas_error()`, `dll_error()`), `LoopFilter` (the second-order filter both loops
+use, with `calc_loop_coef()`), and `ChannelTracker`, which holds the carrier and code
+oscillators and advances one satellite by one code period per `step()`.
+`track_prn()` runs a `ChannelTracker` over the recording. `TrackOptions` can switch
+on, on purpose, the bugs described under "Implementation notes" below (for the
+UI's "break it" switches). `bit_sync()`, `bit_sync_scores()` (the energy of all 20
+bit-edge offsets) and `estimate_cn0()` turn the prompt stream into bits and quality
+figures.
 `track.py` always runs `track_prn(..., detail=True)` and saves the Early/Late
 correlators and both discriminator outputs in each npz (this changes no result).
 `tracking_summary.csv` gets a `tracking_summary.meta.json` recording which recording

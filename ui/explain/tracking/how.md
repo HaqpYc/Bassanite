@@ -1,6 +1,6 @@
 ---
 title: Two loops that follow a moving satellite
-code: bassanite/tracking.py::track_prn
+code: bassanite/tracking.py::ChannelTracker.step, bassanite/tracking.py::track_prn
 ---
 ## Intuition
 

@@ -80,16 +80,27 @@ def panel_names(stage_key: str) -> list[str]:
 
 
 def function_source(code_ref: str) -> str:
-    """Source of `function` in `file.py`, given "file.py::function".
+    """Source of a function in a file, given "file.py::function" or
+    "file.py::Class.method" (or "file.py::Class" for a whole class).
 
-    The file is parsed, never imported or run.
+    The file is parsed, never imported or run. Only top-level definitions (and the
+    methods of top-level classes) are looked up, so a name can't match a nested
+    helper by accident.
     """
-    rel_path, _, func_name = code_ref.partition("::")
+    rel_path, _, name = code_ref.partition("::")
     path = REPO_ROOT / rel_path
     if not path.is_file():
         raise FileNotFoundError(f"{rel_path} does not exist")
     source = path.read_text(encoding="utf-8")
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    nodes = ast.parse(source).body
+    *outer, last = name.split(".")
+    for part in outer:                       # walk into the class(es)
+        cls = next((n for n in nodes if isinstance(n, ast.ClassDef) and n.name == part), None)
+        if cls is None:
+            raise LookupError(f"class {part} not found in {rel_path}")
+        nodes = cls.body
+    for node in nodes:
+        if isinstance(node, defs) and node.name == last:
             return ast.get_source_segment(source, node)
-    raise LookupError(f"function {func_name}() not found in {rel_path}")
+    raise LookupError(f"function {name}() not found in {rel_path}")

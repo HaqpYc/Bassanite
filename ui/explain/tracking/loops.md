@@ -1,6 +1,6 @@
 ---
 title: Doppler and code drift: what the loops follow
-code: bassanite/tracking.py::calc_loop_coef
+code: bassanite/tracking.py::LoopFilter.update, bassanite/tracking.py::calc_loop_coef
 ---
 ## Intuition
 
