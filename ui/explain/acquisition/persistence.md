@@ -4,7 +4,7 @@ code: bassanite/acquisition.py::persistence, bassanite/acquisition.py::code_drif
 ---
 ## Intuition
 
-A single scan can be fooled. With 32 satellites × 324,000 cells, a noise spike above
+A single scan can be fooled. With 32 satellites × {{cells:,}} cells, a noise spike above
 the threshold now and then is to be expected. The test noise cannot pass is
 **persistence**: rescan at several moments and see what comes back.
 

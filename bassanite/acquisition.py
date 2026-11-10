@@ -140,6 +140,22 @@ def scan_seconds(nms):
     return seconds_needed(max(nms, FINE_MS))
 
 
+def noise_peak_over_mean(spms, n_dopplers, nms, trials=3, seed=0):
+    """What peak/mean comes out with noise alone, for a grid of `n_dopplers` rows of
+    `spms` code phases, each cell a sum of `nms` ms (simulated, median of `trials`).
+
+    With noise only, each 1 ms correlation power is exponential, so a cell is a
+    Gamma(nms) value; acquire_prn takes each row's max over its mean and keeps the
+    best row. This is the floor a detection threshold has to clear.
+    """
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(trials):
+        cells = rng.gamma(nms, size=(n_dopplers, spms))
+        out.append(float((cells.max(axis=1) / cells.mean(axis=1)).max()))
+    return float(np.median(out))
+
+
 def code_drift_chips_per_s(doppler_hz):
     """How fast the code phase should slide, given the carrier Doppler.
 

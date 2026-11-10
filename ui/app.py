@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from nicegui import app, ui
 
-from components import refresh_outputs, set_all_panels, stage_page
+from components import refresh_explanations, refresh_outputs, set_all_panels, stage_page
 from source_dialog import source_dialog
 from stages import STAGES, stage_status
 from state import state
@@ -74,6 +74,7 @@ def root() -> None:
         update_labels()
         overview.refresh()
         refresh_outputs()
+        refresh_explanations()
         signal_tab.request_update()
         acquisition_tab.request_update()
         tracking_tab.request_update()

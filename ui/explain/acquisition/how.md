@@ -13,7 +13,7 @@ For each satellite (PRN 1 to 32) there are two unknowns:
   search ±10 kHz in 250 Hz steps.
 
 For each Doppler guess we remove that frequency, then compare the signal with the
-satellite's code at **all code phases at once**, using the FFT. We add up 10 ms of
+satellite's code at **all code phases at once**, using the FFT. We add up {{ms}} ms of
 results so that noise averages out while the satellite keeps adding up in the same
 place. If one cell of the grid stands far above the average, the satellite is there.
 
@@ -24,7 +24,7 @@ place. If one cell of the grid stands far above the average, the satellite is th
 $$y_f[n] = x[n]\, e^{-j 2 \pi f n / f_s}$$
 
 **Circular correlation** with the local code replica $c$ over one 1 ms period
-($N = 4000$ samples at 4 MSPS), for every code phase $\tau$ at once:
+($N = {{spms}}$ samples at {{fs_msps:g}} MSPS), for every code phase $\tau$ at once:
 
 $$R_f[\tau] = \mathrm{IFFT}\left\{ \mathrm{FFT}(y_f) \cdot \overline{\mathrm{FFT}(c)} \right\}$$
 

@@ -11,8 +11,9 @@ import pytest
 UI_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(UI_DIR))
 
-from explain import (EXPLAIN_DIR, function_source, load_panel,  # noqa: E402
-                     load_story, panel_names)
+from explain import (EXPLAIN_DIR, fill, function_source, load_panel,  # noqa: E402
+                     load_story, panel_names, placeholders)
+from explain_values import explain_values  # noqa: E402
 from stages import STAGES, stage_status  # noqa: E402
 from state import IQSource, guess_format  # noqa: E402
 
@@ -111,9 +112,32 @@ def _all_panels():
 def test_panel_parses_and_math_renders(stage_key, name):
     panel = load_panel(stage_key, name)
     assert panel.intuition and panel.math
-    # latex2mathml raises on LaTeX it can't convert.
-    html = markdown2.markdown(panel.math, extras=MD_EXTRAS)
+    # latex2mathml raises on LaTeX it can't convert (placeholders filled first).
+    html = markdown2.markdown(fill(panel.math, explain_values()), extras=MD_EXTRAS)
     assert "<math" in html
+    markdown2.markdown(fill(panel.intuition, explain_values()), extras=MD_EXTRAS)
+
+
+@pytest.mark.parametrize("stage_key,name", _all_panels())
+@pytest.mark.parametrize("fs", [4e6, 2e6, 10e6])
+def test_every_placeholder_has_a_value(stage_key, name, fs):
+    """U2: a figure written {{name}} must be computable for any recording."""
+    panel = load_panel(stage_key, name)
+    values = explain_values(fs, ms=5, dop_range_hz=5000, dop_step_hz=500, threshold=6)
+    for text in (panel.intuition, panel.math):
+        assert placeholders(text) <= set(values), placeholders(text) - set(values)
+        assert "{{" not in fill(text, values)
+
+
+def test_values_follow_the_recording():
+    v4, v2 = explain_values(4e6), explain_values(2e6)
+    assert (v4["spms"], v4["cells"], v4["dop_bins"]) == (4000, 324_000, 81)
+    assert round(v4["chip_per_sample"], 3) == 0.256 and round(v4["m_per_sample"]) == 75
+    assert round(v4["snr_ratio"]) == 200 and round(v4["gain_db"]) == 36
+    assert v2["spms"] == 2000 and v2["cells"] == 162_000
+    assert fill("{{cells:,}} cells, {{fs_msps:g}} MSPS", v2) == "162,000 cells, 2 MSPS"
+    with pytest.raises(KeyError):
+        fill("{{nope}}", v2)
 
 
 @pytest.mark.parametrize("stage_key,name", _all_panels())

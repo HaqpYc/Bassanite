@@ -7,7 +7,8 @@ from collections.abc import Callable
 
 from nicegui import ElementFilter, ui
 
-from explain import function_source, load_panel, load_story, panel_names
+from explain import fill, function_source, load_panel, load_story, panel_names
+from explain_values import current_values
 from stages import STAGES, Stage, rel_path
 from state import state
 
@@ -44,6 +45,17 @@ def md(text: str) -> ui.markdown:
 INTUITION_MARKER = "explain-intuition"
 
 
+@ui.refreshable
+def _live_md(template: str) -> None:
+    """Markdown whose {{placeholders}} follow the loaded recording and its scan."""
+    md(fill(template, current_values()))
+
+
+def refresh_explanations() -> None:
+    """Re-fill every explanation text (after a new source or a new scan)."""
+    _live_md.refresh()
+
+
 def explain_panel(stage_key: str, name: str) -> None:
     """One explanation panel: Intuition, Math and Code.
 
@@ -63,7 +75,7 @@ def explain_panel(stage_key: str, name: str) -> None:
                 with ui.row().classes("items-center gap-2 no-wrap"):
                     ui.icon("lightbulb", color="amber-9")
                     ui.label(panel.title).classes("font-bold")
-                md(panel.intuition)
+                _live_md(panel.intuition)
         _expansion(panel, "The math and the code", ("math", "code"))
     with ui.column().classes("w-full gap-0") \
             .bind_visibility_from(state, "mode", value="expert"):
@@ -88,7 +100,7 @@ def _expansion(panel, title: str, tabs_shown: tuple[str, ...]) -> None:
                     if key == "code":
                         _code_view(panel.code_refs)
                     else:
-                        md(panel.intuition if key == "intuition" else panel.math)
+                        _live_md(panel.intuition if key == "intuition" else panel.math)
 
 
 def _code_view(code_refs: tuple[str, ...]) -> None:

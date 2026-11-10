@@ -39,5 +39,5 @@ the noise's share of the peak cell, so far from the peak $\hat L$ scatters aroun
 $K\sigma^2$, standard deviation $\sqrt{K}\,\sigma^2$. Compared with the average, its
 spread shrinks as $1/\sqrt{K}$. The satellite's cell grows like the average,
 $K(A^2 + \sigma^2)$, so its peak/mean stays near $1 + A^2/\sigma^2$. In one Doppler
-row of 4000 cells, the highest noise spike is about $8.6\times$ the average for
-$K = 1$, $2.5\times$ for $K = 10$ and $2.0\times$ for $K = 20$ (simulated).
+row of {{spms}} cells, the highest noise spike is about ${{row_floor_1:.1f}}\times$ the average for
+$K = 1$, ${{row_floor_10:.1f}}\times$ for $K = 10$ and ${{row_floor_20:.1f}}\times$ for $K = 20$ (simulated).

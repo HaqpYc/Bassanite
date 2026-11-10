@@ -17,6 +17,9 @@ Each stage has a folder ui/explain/<stage>/ containing:
 The `code:` line is optional and may list several functions, separated by
 commas. The Code tab shows their source, read from the files at runtime, so the
 explanation always shows the code that runs.
+
+Figures that depend on the recording or the settings are written as
+{{name}} or {{name:format}} and filled from ui/explain_values.py (see fill()).
 """
 from __future__ import annotations
 
@@ -38,6 +41,20 @@ class Panel:
     intuition: str
     math: str
     code_refs: tuple[str, ...]   # each "path/to/file.py::function_name"
+
+
+_PLACEHOLDER = re.compile(r"\{\{(\w+)(?::([^}]*))?\}\}")
+
+
+def placeholders(text: str) -> set[str]:
+    """The value names a text uses ({{name}} or {{name:format}})."""
+    return {m.group(1) for m in _PLACEHOLDER.finditer(text)}
+
+
+def fill(text: str, values: dict) -> str:
+    """Replace each {{name}} / {{name:format}} with format(values[name], format).
+    A name missing from `values` raises KeyError (the tests check none is)."""
+    return _PLACEHOLDER.sub(lambda m: format(values[m.group(1)], m.group(2) or ""), text)
 
 
 def load_story(stage_key: str) -> str:

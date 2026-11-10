@@ -25,8 +25,8 @@ full resolution.
 
 ## Math
 
-**Code phase.** One sample is $1023 / 4000 = 0.256$ chip at 4 MSPS. One chip is
-$c / 1.023\ \text{MHz} \approx 293$ m of range, so one sample is about 75 m. For a
+**Code phase.** One sample is $1023 / {{spms}} = {{chip_per_sample:.3f}}$ chip at {{fs_msps:g}} MSPS. One chip is
+$c / 1.023\ \text{MHz} \approx 293$ m of range, so one sample is about {{m_per_sample:.0f}} m. For a
 code offset of $\Delta$ chips, the correlation is a triangle:
 
 $$R(\Delta) \approx 1 - |\Delta| \quad (|\Delta| < 1), \qquad R(\Delta) \approx 0 \ \text{otherwise}$$

@@ -6,7 +6,7 @@ code: common/signal_view.py::psd
 
 The spectrum shows how much power there is at each frequency around the tuned
 frequency (1575.42 MHz). The FFT splits a block of $N$ samples into $N$ frequency
-**bins**, each $f_s/N$ wide: about 3.9 kHz for $N = 1024$ at 4 MSPS. The spectrum of
+**bins**, each $f_s/N$ wide: about {{bin_khz:.1f}} kHz for $N = {{spectrum_nfft}}$ at {{fs_msps:g}} MSPS. The spectrum of
 a single block of noise is very jagged, so we average the spectra of many blocks.
 
 What a healthy GPS recording looks like:
