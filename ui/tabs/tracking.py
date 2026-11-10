@@ -33,7 +33,6 @@ RESULT_GLOBS = ("track_PRN*.npz", "track_PRN*.png", "tracking_summary.csv",
                 "tracking_summary.meta.json")
 DEFAULT_SECONDS = 30.0         # enough for stage 04: every subframe at least once
 SECONDS_PER_SECOND = 0.25      # measured: ~7 s to track 30 s of one satellite
-BYTES_PER_SAMPLE_RAM = 10      # complex64 in memory + int8 bytes while loading
 WINDOWS_MS = {20: "20 ms (one bit)", 100: "100 ms", 200: "200 ms", 1000: "1 s"}
 DEFAULT_WINDOW_MS = 200
 CURVE_POINTS = 1500            # points per full-length curve sent to the browser
@@ -59,10 +58,10 @@ def seconds_to_track(src: IQSource, start_s: float, s: TrackSettings) -> float:
     return min(s.seconds or DEFAULT_SECONDS, left)
 
 
-def estimate(src: IQSource, seconds: float, n_prns: int) -> tuple[float, float]:
-    """(minutes, gigabytes) a tracking run needs."""
-    return (n_prns * seconds * SECONDS_PER_SECOND / 60,
-            seconds * src.fs * BYTES_PER_SAMPLE_RAM / 1e9)
+def estimate_minutes(seconds: float, n_prns: int) -> float:
+    """How long a tracking run takes. (Memory no longer grows with the length:
+    track.py reads the recording block by block.)"""
+    return n_prns * seconds * SECONDS_PER_SECOND / 60
 
 
 def track_dir(src: IQSource) -> Path:
@@ -241,31 +240,6 @@ def settle_run() -> tuple[str, str] | None:
     return "negative", f"Tracking failed: {tail or 'exit code ' + str(r.proc.poll())}"
 
 
-def free_memory_gb() -> float | None:
-    """Physical memory available right now, or None if it can't be read."""
-    try:
-        if sys.platform == "win32":
-            import ctypes
-
-            class MemoryStatus(ctypes.Structure):
-                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
-                            ("total_phys", ctypes.c_ulonglong),
-                            ("avail_phys", ctypes.c_ulonglong),
-                            ("total_page", ctypes.c_ulonglong),
-                            ("avail_page", ctypes.c_ulonglong),
-                            ("total_virtual", ctypes.c_ulonglong),
-                            ("avail_virtual", ctypes.c_ulonglong),
-                            ("avail_extended", ctypes.c_ulonglong)]
-            status = MemoryStatus()
-            status.length = ctypes.sizeof(status)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-                return status.avail_phys / 1e9
-            return None
-        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1e9
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
 def track_command(src: IQSource, start_s: float, seconds: float, s: TrackSettings,
                   seed_csv: Path, out_dir: Path) -> list[str]:
     cmd = [sys.executable, "-u", str(TRACK_SCRIPT), "--iq", str(src.path),
@@ -284,8 +258,7 @@ class TrackingRun:
 
     It writes into a temporary folder; the results replace those in `target`
     only when the run succeeds, so a cancelled run leaves the old ones intact.
-    A separate process also keeps the UI responsive and frees the memory
-    (about 1 GB for 30 s of signal) as soon as it ends.
+    A separate process also keeps the UI responsive.
     """
     command: list[str]
     out_dir: Path
@@ -791,15 +764,10 @@ class TrackingTab:
             return
         seconds = seconds_to_track(src, self._scan_start, self.settings)
         n = len(self._run_prns())
-        minutes, gb = estimate(src, seconds, n)
+        minutes = estimate_minutes(seconds, n)
         took = f"about {minutes:.0f} min" if minutes >= 1.5 else f"about {minutes * 60:.0f} s"
-        text = (f"Tracking {n} satellite{'s' if n != 1 else ''} over {seconds:.0f} s takes "
-                f"{took} and needs about {gb:.1f} GB of memory.")
-        free = free_memory_gb()
-        if free is not None and gb > 0.7 * free:
-            text += (f" ⚠️ Only {free:.1f} GB is free right now: close other programs, or "
-                     "track fewer seconds (Expert mode), or the computer may slow down.")
-        self.estimate_label.set_text(text)
+        self.estimate_label.set_text(
+            f"Tracking {n} satellite{'s' if n != 1 else ''} over {seconds:.0f} s takes {took}.")
 
     # --- running ------------------------------------------------------------------------
 

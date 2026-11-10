@@ -81,6 +81,84 @@ def load_iq(path, fmt="int8", fs=4e6, seconds=None, skip_seconds=0.0,
     return x
 
 
+class IQReader:
+    """A recording read lazily: `reader[a:b]` returns those samples as np.complex64,
+    scaled and DC-corrected exactly like `load_iq`, without loading the rest.
+
+    The file is memory-mapped, so a 60 s recording costs no memory until a slice
+    is read; tracking only touches about 4000 samples per 1 ms step. Supports
+    len(), .size and slicing with step 1 (what the tracking loops use).
+    """
+
+    def __init__(self, path, fmt="int8", fs=4e6, seconds=None, skip_seconds=0.0,
+                 remove_dc=True):
+        self.fmt = normalize_format(fmt)
+        self.fs = float(fs)
+        dtype = np.int8 if self.fmt == "int8" else np.complex64
+        per_sample = 2 if self.fmt == "int8" else 1     # memmap items per sample
+        mm = np.memmap(path, dtype=dtype, mode="r")
+        total = mm.size // per_sample
+        self._start = min(int(round(skip_seconds * self.fs)), total)
+        n = total - self._start
+        if seconds is not None:
+            n = min(n, int(round(seconds * self.fs)))
+        self._n = max(n, 0)
+        self._mm, self._per = mm, per_sample
+        self._dc = np.complex64(self._mean() if remove_dc and self._n else 0)
+
+    def _raw(self, a, b):
+        """Samples a..b of the window, scaled but not DC-corrected."""
+        if self.fmt == "int8":
+            raw = self._mm[2 * (self._start + a):2 * (self._start + b)]
+            x = np.empty(raw.size // 2, dtype=np.complex64)
+            x.real = raw[0::2]
+            x.imag = raw[1::2]
+            x /= 128.0
+            return x
+        return np.array(self._mm[self._start + a:self._start + b], dtype=np.complex64)
+
+    def _mean(self, chunk=4_000_000):
+        """The window's mean, summed block by block (exact for int8)."""
+        if self.fmt == "int8":
+            total_i = total_q = 0
+            for a in range(0, self._n, chunk):
+                raw = self._mm[2 * (self._start + a):2 * (self._start + min(a + chunk, self._n))]
+                total_i += int(raw[0::2].sum(dtype=np.int64))
+                total_q += int(raw[1::2].sum(dtype=np.int64))
+            return complex(total_i, total_q) / (128.0 * self._n)
+        total = 0j
+        for a in range(0, self._n, chunk):
+            total += complex(self._raw(a, min(a + chunk, self._n)).sum(dtype=np.complex128))
+        return total / self._n
+
+    def __len__(self):
+        return self._n
+
+    @property
+    def size(self):
+        return self._n
+
+    def __getitem__(self, key):
+        if not isinstance(key, slice):
+            raise TypeError("IQReader supports slices only, e.g. reader[a:b]")
+        a, b, step = key.indices(self._n)
+        if step != 1:
+            raise ValueError("IQReader slices must have step 1")
+        x = self._raw(a, max(a, b))
+        if self._dc:
+            x -= self._dc
+        return x
+
+
+def open_iq(path, fmt="int8", fs=4e6, seconds=None, skip_seconds=0.0, remove_dc=True):
+    """Like `load_iq`, but returns an IQReader that reads samples only when sliced.
+
+    Use it for long passes over a recording (tracking); `load_iq` is simpler for
+    the short windows a scan or a plot needs.
+    """
+    return IQReader(path, fmt, fs, seconds, skip_seconds, remove_dc)
+
+
 if __name__ == "__main__":
     import argparse
     import os

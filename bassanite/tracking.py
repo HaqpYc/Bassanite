@@ -108,6 +108,9 @@ def track_prn(x, fs, prn, code_phase_samp, doppler_hz,
     (i_prompt, q_prompt, doppler_hz, code_phase_samp) truncated to the number of
     epochs actually tracked.
 
+    `x` is the complex baseband signal: an array, or an IQReader
+    (common/iq_loader.open_iq), since the loop only slices it and takes len().
+
     Parameters
     ----------
     code_phase_samp : float   acquisition code phase, in samples at this fs

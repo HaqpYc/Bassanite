@@ -153,15 +153,9 @@ def test_one_shared_run_at_a_time_and_cancel_leaves_nothing(tracked, tmp_path):
         trk._current = None
 
 
-def test_free_memory_is_readable():
-    free = trk.free_memory_gb()
-    assert free is None or free > 0
-
-
 def test_estimate_and_command():
     src = IQSource("x.bin", "int8", 4e6)
-    minutes, gb = trk.estimate(src, 30.0, 8)
-    assert minutes == pytest.approx(1.0) and gb == pytest.approx(1.2)
+    assert trk.estimate_minutes(30.0, 8) == pytest.approx(1.0)
     cmd = trk.track_command(src, 2.0, 30.0, trk.TrackSettings(prns=(5, 20)), "seeds.csv",
                             "out")
     assert cmd[cmd.index("--skip-seconds") + 1] == "2.0"

@@ -86,3 +86,23 @@ def test_waterfall_shape_and_duration(tmp_path):
     times, freqs, power = waterfall(f, "int8", FS, nfft=256, rows=10)
     assert power.shape == (10, 256) and len(times) == 10 and len(freqs) == 256
     assert times[0] == 0.0 and times[-1] < 0.05
+
+
+def test_open_iq_matches_load_iq(tmp_path):
+    from common.iq_loader import load_iq, open_iq
+    rng = np.random.default_rng(1)
+    raw = rng.integers(-60, 60, size=2 * 50_000).astype(np.int8)
+    raw[0::2] += 5                                          # a DC offset to remove
+    path = tmp_path / "rec.bin"
+    raw.tofile(path)
+    for kw in ({}, {"seconds": 0.004, "skip_seconds": 0.002}, {"remove_dc": False}):
+        full = load_iq(path, "int8", FS, **kw)
+        lazy = open_iq(path, "int8", FS, **kw)
+        assert len(lazy) == lazy.size == len(full)
+        assert np.allclose(lazy[:], full, atol=1e-6)
+        assert np.allclose(lazy[100:4100], full[100:4100], atol=1e-6)
+        assert lazy[len(full) - 3:len(full) + 10].shape == (3,)   # clipped at the end
+    path64 = tmp_path / "rec.cf32"
+    load_iq(path, "int8", FS).tofile(path64)
+    assert np.allclose(open_iq(path64, "complex64", FS)[:], load_iq(path64, "complex64", FS),
+                       atol=1e-6)

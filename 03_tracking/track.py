@@ -30,9 +30,10 @@ web UI); this script is their command line.
 
 HOW IT CONNECTS TO THE OTHER STAGES (the file is the interface)
 ---------------------------------------------------------------
-  * FROM stage 01: samples are loaded only through common/iq_loader.load_iq, exactly
-    like stage 02 -- so a bundled recording and a fresh live `hackrf_transfer`
-    capture are handled identically (just pass --iq/--format/--fs).
+  * FROM stage 01: samples come through common/iq_loader.open_iq, which applies
+    the same conditioning as stage 02's load_iq but reads the file block by block --
+    so a bundled recording and a fresh live `hackrf_transfer` capture are handled
+    identically (just pass --iq/--format/--fs), whatever their length.
   * FROM stage 02: the per-PRN seeds (Doppler + code phase) are read from
     results/<recording>/acquisition/scan_results.csv. We seed from
     `code_phase_chips` (sample-rate independent) and convert to samples at our fs.
@@ -68,7 +69,7 @@ from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
                                 save_track, summarize, summary_row, track_file_name,
                                 track_prn, write_summary)
 from common.ca_code import CODE_LENGTH                         # noqa: E402
-from common.iq_loader import load_iq                           # noqa: E402
+from common.iq_loader import open_iq                           # noqa: E402
 
 
 def write_plot(out_dir, prn, fs, track, cn0):
@@ -175,10 +176,12 @@ def main():
     if not seeds:
         sys.exit("no PRNs to track (no detected satellites in the CSV; try --all)")
 
-    # --- load IQ once (same loader as stage 02; live or recording, it's a file) -
-    x = load_iq(a.iq, a.format, a.fs, seconds=a.seconds, skip_seconds=a.skip_seconds)
-    rms = float(np.sqrt(np.mean(np.abs(x) ** 2))) if x.size else 0.0
-    print(f"loaded {x.size} samples ({x.size / a.fs:.2f}s) from {a.iq}  (RMS={rms:.4f})")
+    # --- open the IQ (same conditioning as stage 02's load_iq). The file is read
+    # block by block as the loops advance, so memory does not grow with its length.
+    x = open_iq(a.iq, a.format, a.fs, seconds=a.seconds, skip_seconds=a.skip_seconds)
+    first = x[:int(0.1 * a.fs)]                            # RMS of the first 0.1 s
+    rms = float(np.sqrt(np.mean(np.abs(first) ** 2))) if first.size else 0.0
+    print(f"opened {x.size} samples ({x.size / a.fs:.2f}s) from {a.iq}  (RMS={rms:.4f})")
     print(f"tracking {len(seeds)} PRN(s): {[s['prn'] for s in seeds]}  "
           f"(PLL {a.pll_bw:.0f} Hz, DLL {a.dll_bw:.1f} Hz)")
 

@@ -132,7 +132,8 @@ if __name__ in {"__main__", "__mp_main__"}:
                              "a second copy")
     args, _ = parser.parse_known_args()   # tolerant: pytest runs this file with its own args
     # reconnect_timeout: how long a page may stay silent before NiceGUI gives up on
-    # it and reloads it. The default 3 s is too short when the computer is busy
-    # (e.g. memory paging during a tracking run), so allow 10 s.
+    # it and reloads it. The default 3 s proved too short when this machine was
+    # busy paging; tracking no longer loads whole recordings, but 10 s costs
+    # nothing and still covers other load.
     ui.run(root, title="Bassanite", port=args.port, show=not args.no_browser, reload=False,
            reconnect_timeout=10.0)

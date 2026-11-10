@@ -91,9 +91,11 @@ correlators and both discriminator outputs in each npz (this changes no result).
 `tracking_summary.csv` gets a `tracking_summary.meta.json` recording which recording
 and settings produced it.
 
-> Memory note: tracking needs the whole window in RAM: about 1.2 GB for 30 s of int8
-> at 4 MSPS (the complex64 samples plus the raw bytes while loading). Use `--seconds`
-> to cap it.
+> Memory note: `track.py` reads the recording block by block (`common/iq_loader.py::open_iq`
+> memory-maps the file and converts only the ~4000 samples each 1 ms step needs), so
+> memory does not grow with the recording's length. A 30 s run of 8 satellites peaks at
+> about 280 MB of working set, mostly file pages the OS can reclaim. Loading the whole
+> window as complex64 used to take about 2 GB.
 
 ---
 
