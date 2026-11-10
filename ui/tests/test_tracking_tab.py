@@ -1,6 +1,6 @@
 """Tests for the Track tab: the loop discriminators, bit sync, running track.py
 as a separate process, reading its results back, and the PLL try-it. All on
-synthetic signals; the real 03_tracking/ results are never touched."""
+synthetic signals; the real results/ folder is never touched."""
 import asyncio
 import time
 
@@ -184,10 +184,7 @@ async def test_tab_runs_tracking_into_a_temporary_folder(user: User, tmp_path,
                                                           monkeypatch) -> None:
     src = IQSource(write_int8(tmp_path / "rec.bin", synthetic_gps(SECONDS, cn0_dbhz=46.0)),
                    "int8", FS)
-    seed_csv = tmp_path / "scan_results.csv"
-    acq.run_scan(src, acq.ScanSettings(dop_range_hz=3000, ms=10), csv_path=seed_csv)
-    monkeypatch.setattr(acq, "RESULTS_CSV", seed_csv)
-    monkeypatch.setattr(trk, "TRACK_DIR", tmp_path / "03_tracking")
+    acq.run_scan(src, acq.ScanSettings(dop_range_hz=3000, ms=10))   # tests' results root
     old_source = state.source
     state.source = src
     try:
@@ -195,10 +192,10 @@ async def test_tab_runs_tracking_into_a_temporary_folder(user: User, tmp_path,
         await user.should_see("Not tracked yet", retries=20)
         user.find(kind=ui.button, content="Track the satellites").click()
         for _ in range(600):
-            if trk.summary_path().is_file():
+            if trk.summary_path(trk.track_dir(src)).is_file():
                 break
             await asyncio.sleep(0.1)
-        assert trk.summary_path().is_file()
+        assert trk.summary_path(trk.track_dir(src)).is_file()
         await user.should_see("1 of 1 satellites locked", retries=30)
         await user.should_see(f"PRN {PRN} up close (locked)", retries=30)
     finally:

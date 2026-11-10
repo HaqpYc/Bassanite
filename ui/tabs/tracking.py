@@ -16,8 +16,9 @@ from nicegui import background_tasks, context, run, ui
 
 from state import REPO_ROOT, IQSource, state  # first: puts the repo root on sys.path
 
-import tabs.acquisition as acquisition  # noqa: E402  (its RESULTS_CSV is the seed file)
+import tabs.acquisition as acquisition  # noqa: E402  (its results_csv is the seed file)
 from bassanite.provenance import read_meta  # noqa: E402,I001
+from bassanite.results import tracking_dir  # noqa: E402
 from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
                                 LOCK_QI_MAX, MS_PER_BIT, SUMMARY_CSV, bit_sync_scores,
                                 read_summary, summarize, track_file_name, track_prn)
@@ -25,9 +26,8 @@ from bassanite.tracking import load_track as read_track_file  # noqa: E402
 from common.iq_loader import load_iq  # noqa: E402
 from components import explain_panel  # noqa: E402
 from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure, layout  # noqa: E402
-from stages import MIN_SATS_FOR_FIX, result_is_for_other_recording  # noqa: E402
+from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording  # noqa: E402
 
-TRACK_DIR = REPO_ROOT / "03_tracking"          # where results live (tests redirect it)
 TRACK_SCRIPT = REPO_ROOT / "03_tracking" / "track.py"
 RESULT_GLOBS = ("track_PRN*.npz", "track_PRN*.png", "tracking_summary.csv",
                 "tracking_summary.meta.json")
@@ -65,14 +65,19 @@ def estimate(src: IQSource, seconds: float, n_prns: int) -> tuple[float, float]:
             seconds * src.fs * BYTES_PER_SAMPLE_RAM / 1e9)
 
 
-def summary_path(track_dir: Path | None = None) -> Path:
-    return (track_dir or TRACK_DIR) / SUMMARY_CSV
+def track_dir(src: IQSource) -> Path:
+    """Where the tracking results of `src` live (results/<recording>/tracking/)."""
+    return tracking_dir(src.path)
 
 
-def saved_tracking(src: IQSource, track_dir: Path | None = None
+def summary_path(folder: Path) -> Path:
+    return folder / SUMMARY_CSV
+
+
+def saved_tracking(src: IQSource, folder: Path | None = None
                    ) -> tuple[list[dict], dict] | None:
     """(summary rows, provenance) of the results on disk, if they belong to `src`."""
-    path = summary_path(track_dir)
+    path = summary_path(folder or track_dir(src))
     if not path.is_file() or result_is_for_other_recording(path, src):
         return None
     return read_summary(path), read_meta(path) or {}
@@ -119,8 +124,8 @@ def load_track(path: Path, t0: float) -> Track:
     return _track_cache[key]
 
 
-def track_file(prn: int, track_dir: Path | None = None) -> Path:
-    return (track_dir or TRACK_DIR) / track_file_name(prn)
+def track_file(prn: int, folder: Path) -> Path:
+    return folder / track_file_name(prn)
 
 
 def window_slice(n_ms: int, end_ms: int, w_ms: int) -> slice:
@@ -646,7 +651,8 @@ class TrackingTab:
                                     on_change=lambda e: self._set_prns(e.value)) \
                 .props("use-chips").classes("w-full")
             ui.label("Tracking starts where the scan of step 2 looked, so the seeds "
-                     "line up. The run writes 03_tracking/, like track.py.") \
+                     "line up. Like track.py, the run writes "
+                     "results/<recording>/tracking/.") \
                 .classes("text-xs text-grey-7")
 
     def _build_run(self) -> None:
@@ -817,8 +823,8 @@ class TrackingTab:
         s = replace(self.settings, prns=tuple(self._run_prns()))
         self.stop_play()
         try:
-            start_tracking(src, self._scan_start, seconds, s, acquisition.RESULTS_CSV,
-                           TRACK_DIR)
+            start_tracking(src, self._scan_start, seconds, s, acquisition.results_csv(src),
+                           track_dir(src))
         except (OSError, RuntimeError) as err:
             ui.notify(f"Could not start tracking: {err}", type="warning")
             return
@@ -901,7 +907,7 @@ class TrackingTab:
 
         saved = saved_tracking(src)
         if saved is None:
-            other = summary_path().is_file()
+            other = summary_path(track_dir(src)).is_file()
             self._show_nothing(("The tracking results on disk are for another recording. "
                                 if other else "Not tracked yet. ")
                                + "Press “Track the satellites”.")
@@ -909,7 +915,8 @@ class TrackingTab:
         self.rows, self.meta = saved
         t0 = float((self.meta.get("settings") or {}).get("skip_seconds") or 0.0)
         try:
-            tracks = await run.io_bound(self._load_tracks, [r["prn"] for r in self.rows], t0)
+            tracks = await run.io_bound(self._load_tracks, track_dir(src),
+                                        [r["prn"] for r in self.rows], t0)
         except (OSError, ValueError, KeyError) as err:
             self._show_nothing(f"Could not read the tracking results: {err}")
             return
@@ -924,8 +931,9 @@ class TrackingTab:
         self._select(self.selected)
 
     @staticmethod
-    def _load_tracks(prns: list[int], t0: float) -> dict[int, Track]:
-        return {p: load_track(track_file(p), t0) for p in prns if track_file(p).is_file()}
+    def _load_tracks(folder: Path, prns: list[int], t0: float) -> dict[int, Track]:
+        return {p: load_track(track_file(p, folder), t0) for p in prns
+                if track_file(p, folder).is_file()}
 
     def _show_nothing(self, message: str) -> None:
         self.status_label.set_text(message)
@@ -954,7 +962,8 @@ class TrackingTab:
             f"Tracked {seconds:.1f} s from {float(s.get('skip_seconds') or 0):.1f} s, "
             f"PLL {float(s.get('pll_bw_hz', DEFAULT_PLL_BW)):g} Hz, "
             f"DLL {float(s.get('dll_bw_hz', DEFAULT_DLL_BW)):g} Hz. "
-            "Results: 03_tracking/ (tracking_summary.csv, track_PRNnn.npz)")
+            f"Results: {rel_path(track_dir(state.source))}/ "
+            "(tracking_summary.csv, track_PRNnn.npz)")
 
     def _show_cards(self) -> None:
         self.cards.clear()

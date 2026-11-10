@@ -34,12 +34,12 @@ HOW IT CONNECTS TO THE OTHER STAGES (the file is the interface)
     like stage 02 -- so a bundled recording and a fresh live `hackrf_transfer`
     capture are handled identically (just pass --iq/--format/--fs).
   * FROM stage 02: the per-PRN seeds (Doppler + code phase) are read from
-    02_acquisition/scan_results.csv. We seed from `code_phase_chips` (sample-rate
-    independent) and convert to samples at our own fs.
+    results/<recording>/acquisition/scan_results.csv. We seed from
+    `code_phase_chips` (sample-rate independent) and convert to samples at our fs.
   * TO stage 04: per PRN we write track_PRN<nn>.npz holding the dense 1 kHz prompt
     stream AND the derived 50 bps symbols, plus a tracking_summary.csv (with
-    tracking_summary.meta.json: which recording and settings) and a diagnostic PNG.
-    Stage 04 starts from these at frame/preamble sync.
+    tracking_summary.meta.json: which recording and settings) and a diagnostic PNG,
+    into results/<recording>/tracking/. Stage 04 starts from these at frame sync.
 
 This productionizes the proven prototype in
 issues/clock_drift/solution_clean_capture/mini_gps_rx.py (its track()), reusing the
@@ -62,6 +62,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from bassanite.provenance import write_meta                    # noqa: E402
+from bassanite.results import scan_csv, tracking_dir           # noqa: E402
 from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
                                 MS_PER_BIT, PROMPT_RATE_HZ, SUMMARY_CSV, read_seeds,
                                 save_track, summarize, summary_row, track_file_name,
@@ -122,9 +123,9 @@ def main():
                     help="how much of the file to track (default: whole file)")
     ap.add_argument("--skip-seconds", type=float, default=0.0,
                     help="skip this many seconds from the start")
-    ap.add_argument("--from-csv",
-                    default=os.path.join(_ROOT, "02_acquisition", "scan_results.csv"),
-                    help="stage-02 acquisition results to seed from")
+    ap.add_argument("--from-csv", default=None,
+                    help="stage-02 acquisition results to seed from (default: "
+                         "results/<recording>/acquisition/scan_results.csv)")
     ap.add_argument("--prn", type=int, default=None,
                     help="track only this PRN (seed from CSV unless --doppler given)")
     ap.add_argument("--prns", default=None,
@@ -139,12 +140,18 @@ def main():
                     help="PLL bandwidth (Hz)")
     ap.add_argument("--dll-bw", type=float, default=DEFAULT_DLL_BW,
                     help="DLL bandwidth (Hz)")
-    ap.add_argument("--out-dir", default=_HERE, help="where to write outputs")
+    ap.add_argument("--out-dir", default=None,
+                    help="where to write outputs (default: results/<recording>/tracking/)")
     ap.add_argument("--no-plot", action="store_true", help="skip diagnostic PNGs")
     ap.add_argument("--progress", action="store_true",
                     help="print 'PROGRESS <k> <n> <prn> <done_ms> <total_ms>' lines "
                          "(for the web UI)")
     a = ap.parse_args()
+    if a.from_csv is None:
+        a.from_csv = str(scan_csv(a.iq))
+    if a.out_dir is None:
+        a.out_dir = str(tracking_dir(a.iq))
+    os.makedirs(a.out_dir, exist_ok=True)
 
     # --- assemble the list of (prn, doppler, code-phase) seeds ------------------
     spms = int(round(a.fs * 1e-3))

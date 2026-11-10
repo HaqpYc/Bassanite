@@ -94,6 +94,13 @@ def test_scan_writes_results_and_provenance(recording, tmp_path):
     assert acq.saved_results(other, csv_path) is None
 
 
+def test_scan_results_go_to_the_recordings_own_folder(recording, results_root):
+    acq.run_scan(recording, acq.ScanSettings(dop_range_hz=1000, ms=2))
+    assert acq.results_csv(recording) == results_root / "synthetic" / "acquisition" /         "scan_results.csv"
+    assert acq.results_csv(recording).is_file()
+    assert acq.saved_results(recording) is not None
+
+
 def test_window_never_runs_past_the_end(recording):
     assert acq.window_start(recording, 10.0, 10) == pytest.approx(0.06 - 0.015)
     with pytest.raises(ValueError, match="too short"):
@@ -160,8 +167,7 @@ def test_persistence_measures_the_drift_the_doppler_predicts(tmp_path):
 
 async def test_tab_steps_the_code_and_scans_without_touching_real_results(
         user: User, recording, tmp_path, monkeypatch) -> None:
-    csv_path = tmp_path / "scan_results.csv"
-    monkeypatch.setattr(acq, "RESULTS_CSV", csv_path)
+    csv_path = acq.results_csv(recording)          # under the test's results root
     # A narrower Doppler search, so the scan takes a moment rather than seconds.
     monkeypatch.setattr(acq, "DEFAULT_SETTINGS", acq.ScanSettings(dop_range_hz=3000))
     old_source = state.source

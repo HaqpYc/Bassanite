@@ -6,8 +6,8 @@ from collections.abc import Callable
 from nicegui import ui
 
 from components import md
-from stages import STAGES, furthest_done, stage_status
-from state import default_source, state
+from stages import STAGES, furthest_done, results_history, stage_status
+from state import IQSource, default_source, state
 
 INTRO = """
 **Bassanite turns raw radio samples into a GPS position, one visible step at a time.**
@@ -69,12 +69,35 @@ def _result_card() -> None:
                      "not built yet.").classes("text-xs text-grey-7")
 
 
-def _history_card() -> None:
+def _history_card(on_changed: Callable[[], None]) -> None:
     with ui.card().classes("flex-1 min-w-[16rem]").props("flat bordered"):
         ui.label("Run history").classes("text-subtitle1 font-bold")
-        ui.label("Runs will be listed here once the app runs the stages itself. "
-                 "For now, the results on this page come from the files written by "
-                 "the command-line scripts.").classes("text-grey-7")
+        runs = results_history()
+        if not runs:
+            ui.label("No results yet. Each recording gets its own folder, "
+                     "results/<recording>/, when a step runs on it.").classes("text-grey-7")
+            return
+
+        def open_run(src: IQSource) -> None:
+            state.source = src
+            on_changed()
+
+        for run in runs:
+            current = (state.source is not None and run.source is not None
+                       and state.source.path.resolve() == run.source.path.resolve())
+            with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                with ui.column().classes("gap-0 flex-1 min-w-0"):
+                    ui.label(run.name).classes("font-medium break-all")
+                    steps = ", ".join(f"{s.number} {s.title}" for s in run.stages)
+                    ui.label(f"{steps}" + (f" · {run.created}" if run.created else "")) \
+                        .classes("text-xs text-grey-7")
+                if current:
+                    ui.label("loaded").classes("text-xs text-positive")
+                elif run.source is not None:
+                    ui.button("Open", on_click=lambda s=run.source: open_run(s)) \
+                        .props("flat dense no-caps")
+                else:
+                    ui.label("recording missing").classes("text-xs text-grey-6")
 
 
 def _first_run_checklist(open_source_dialog: Callable[[], None],
@@ -117,5 +140,5 @@ def overview(go_to: Callable[[str], None], open_source_dialog: Callable[[], None
         with ui.row().classes("w-full items-stretch gap-4"):
             _input_card(open_source_dialog, go_to)
             _result_card()
-            _history_card()
+            _history_card(on_changed)
         _first_run_checklist(open_source_dialog, on_changed, go_to)

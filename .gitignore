@@ -4,3 +4,7 @@ recordings/
 # the absolute path of every source file (user name, folders).
 __pycache__/
 *.py[cod]
+
+# Stage results: one folder per recording, regenerated from the recordings
+# (see bassanite/results.py).
+results/

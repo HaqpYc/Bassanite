@@ -38,7 +38,8 @@ with --threshold); persistence across --skip-seconds is the real confirmation.
 The search itself lives in ../bassanite/acquisition.py (importable, also used by
 the web UI); this script is its command line: it loads the recording, runs the
 scan, and writes the table, scan_results.csv (+ scan_results.meta.json, which
-records the recording and settings used) and scan_plot.png.
+records the recording and settings used) and scan_plot.png, by default into
+results/<recording name>/acquisition/ (see ../bassanite/results.py).
 
 Example:
   python scan_prns.py --iq recordings/capture.bin --format int8 --fs 4e6
@@ -59,6 +60,7 @@ from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  #
                                    DEFAULT_MS, DEFAULT_THRESHOLD, scan,
                                    seconds_needed, write_results)
 from bassanite.provenance import write_meta                    # noqa: E402
+from bassanite.results import scan_csv                         # noqa: E402
 from common.iq_loader import load_iq                           # noqa: E402
 
 
@@ -133,9 +135,18 @@ def main():
                     help="peak/mean detection threshold (noise floor here is ~3.5 "
                          "for 10 ms @ 4 MSPS; persistence across --skip-seconds is "
                          "the real confirmation)")
-    ap.add_argument("--csv", default=os.path.join(_HERE, "scan_results.csv"))
-    ap.add_argument("--plot", default=os.path.join(_HERE, "scan_plot.png"))
+    ap.add_argument("--csv", default=None,
+                    help="where to write the results (default: "
+                         "results/<recording>/acquisition/scan_results.csv)")
+    ap.add_argument("--plot", default=None,
+                    help="where to write the plot (default: next to the CSV)")
     a = ap.parse_args()
+    if a.csv is None:
+        a.csv = str(scan_csv(a.iq))
+    if a.plot is None:
+        a.plot = os.path.join(os.path.dirname(a.csv), "scan_plot.png")
+    os.makedirs(os.path.dirname(os.path.abspath(a.csv)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(a.plot)), exist_ok=True)
 
     load_secs = seconds_needed(a.ms)              # just enough + small margin
     x = load_iq(a.iq, a.format, a.fs, seconds=load_secs,

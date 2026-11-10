@@ -55,36 +55,37 @@ def test_status_without_source():
     assert stage_status(STAGES[0], None).state == "locked"
 
 
-def test_results_for_another_recording_are_flagged(tmp_path, monkeypatch):
+def test_each_recording_has_its_own_results(tmp_path, results_root):
     import stages
     from bassanite.provenance import write_meta
-    from state import DEFAULT_RECORDING
     stage = stages.STAGE_BY_KEY["acquisition"]
     rec = tmp_path / "new.bin"
     rec.write_bytes(bytes(8))
     other = tmp_path / "other.bin"
     other.write_bytes(bytes(8))
+    assert stage_status(stage, IQSource(rec)).summary == "Not run yet"
 
-    # Point the stage's results at a temporary folder.
-    monkeypatch.setattr(stages, "REPO_ROOT", tmp_path)
-    results = tmp_path / stage.output_files[0]
+    results = results_root / "new" / stage.output_files[0]
     results.parent.mkdir(parents=True)
-    results.write_text("prn\n")
+    results.write_text("prn,doppler_hz,code_phase_samp,code_phase_chips,detected\n"
+                       "5,250.0,10,2.5575,True\n")
+    status = stage_status(stage, IQSource(rec))       # no provenance: the folder's own
+    assert status.state == "done" and "1 satellites detected" in status.summary
+    assert stage_status(stage, IQSource(other)).summary == "Not run yet"   # its own folder
+    assert stages.output_paths(stage, IQSource(rec)) == [results]
 
-    # No provenance file: results are assumed to be for capture.bin.
-    assert stages.results_from_other_recording(stage, IQSource(rec))
-    assert not stages.results_from_other_recording(stage, IQSource(DEFAULT_RECORDING))
-    assert stages.results_source_name(stage) == DEFAULT_RECORDING.name
-
-    # With provenance: the named recording, and only it, matches.
+    # Provenance names the exact recording: a same-named file elsewhere is flagged.
     write_meta(results, "acquisition", rec, "int8", 4e6, {})
-    assert not stages.results_from_other_recording(stage, IQSource(rec))
-    assert stages.results_from_other_recording(stage, IQSource(other))
-    assert stages.results_source_name(stage) == "new.bin"
+    assert stage_status(stage, IQSource(rec)).state == "done"
+    namesake = tmp_path / "elsewhere" / "new.bin"
+    namesake.parent.mkdir()
+    namesake.write_bytes(bytes(8))
+    status = stage_status(stage, IQSource(namesake))
+    assert status.state == "attention" and "same name" in status.summary
 
-    assert not stages.results_from_other_recording(stage, None)
-    assert not stages.results_from_other_recording(stages.STAGE_BY_KEY["signal"],
-                                                    IQSource(rec))
+    [past] = stages.results_history()
+    assert past.name == "new" and past.stages == (stage,)
+    assert past.source.path == rec.resolve()
 
 
 def test_unbuilt_stages_are_locked():

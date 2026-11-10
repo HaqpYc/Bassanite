@@ -10,21 +10,21 @@ from pathlib import Path
 import numpy as np
 from nicegui import run, ui
 
-from state import REPO_ROOT, IQSource, state  # first: puts the repo root on sys.path
+from state import IQSource, state  # first: puts the repo root on sys.path
 
 from bassanite.acquisition import (DEFAULT_DOP_RANGE_HZ, DEFAULT_DOP_STEP_HZ,  # noqa: E402,I001
                                    DEFAULT_MS, DEFAULT_THRESHOLD, acquire_prn, cn0_from_peak,
                                    code_drift_chips_per_s, correlation_surface,
                                    read_results, scan, seconds_needed, write_results)
 from bassanite.provenance import read_meta, write_meta  # noqa: E402
+from bassanite.results import scan_csv  # noqa: E402
 from common.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,  # noqa: E402
                             REGISTER_STAGES, ca_code, register_states)
 from common.iq_loader import load_iq  # noqa: E402
 from components import explain_panel  # noqa: E402
 from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure  # noqa: E402
-from stages import MIN_SATS_FOR_FIX, result_is_for_other_recording  # noqa: E402
+from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording  # noqa: E402
 
-RESULTS_CSV = REPO_ROOT / "02_acquisition" / "scan_results.csv"
 PRNS = tuple(range(1, 33))
 SURFACE_COLUMNS = 512      # code-phase columns sent to the browser for the surface
 TRY_MAX_MS = 20            # the integration-time slider goes up to this
@@ -80,15 +80,21 @@ def load_window(src: IQSource, skip_s: float, ms: int, extra_ms: int = 0) -> np.
     return x
 
 
+def results_csv(src: IQSource) -> Path:
+    """Where the scan results of `src` live (results/<recording>/acquisition/)."""
+    return scan_csv(src.path)
+
+
 def run_scan(src: IQSource, s: ScanSettings, progress=None,
              csv_path: Path | None = None) -> list[dict]:
     """Scan all 32 PRNs and write the results where stage 03 reads them."""
-    csv_path = csv_path or RESULTS_CSV
+    csv_path = csv_path or results_csv(src)
     s = replace(s, skip_seconds=window_start(src, s.skip_seconds, s.ms))
     x = load_window(src, s.skip_seconds, s.ms)
     dop_min, dop_max, dop_step, nms = s.search()
     results = scan(x, src.fs, dop_min, dop_max, dop_step, nms, s.threshold,
                    progress=progress)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_results(results, csv_path)
     write_meta(csv_path, "acquisition", src.path, src.fmt, src.fs, asdict(s))
     return results
@@ -97,17 +103,10 @@ def run_scan(src: IQSource, s: ScanSettings, progress=None,
 def saved_results(src: IQSource, csv_path: Path | None = None
                   ) -> tuple[list[dict], ScanSettings] | None:
     """The scan results on disk, if they belong to `src`."""
-    csv_path = csv_path or RESULTS_CSV
+    csv_path = csv_path or results_csv(src)
     if not csv_path.is_file() or result_is_for_other_recording(csv_path, src):
         return None
     return read_results(csv_path), ScanSettings.from_meta(read_meta(csv_path))
-
-
-def _rel(path: Path) -> str:
-    try:
-        return path.relative_to(REPO_ROOT).as_posix()
-    except ValueError:
-        return str(path)
 
 
 def detected_prns(results: list[dict] | None) -> list[int]:
@@ -932,7 +931,7 @@ class AcquisitionTab:
         detail = (f"Searched Doppler ±{s.dop_range_hz:,.0f} Hz in {s.dop_step_hz:g} Hz steps, "
                   f"adding up {s.ms} ms of signal from {s.skip_seconds:.1f} s.")
         if self.results is None:
-            other = RESULTS_CSV.is_file()
+            other = results_csv(src).is_file()
             self.scan_label.set_text(
                 ("The results on disk are for another recording. " if other else
                  "Not scanned yet. ") + f"Press Scan to search {src.path.name} "
@@ -952,7 +951,7 @@ class AcquisitionTab:
         else:
             self.scan_label.set_text("No satellite found. Is the antenna outdoors with a "
                                      "clear view of the sky, and powered (bias-tee on)?")
-        self.scan_detail.set_text(f"{detail} Results: {_rel(RESULTS_CSV)}")
+        self.scan_detail.set_text(f"{detail} Results: {rel_path(results_csv(src))}")
         self.bars.update_figure(bars_figure(self.results, s.threshold, self.selected))
         self.handover.rows = handover_rows([r for r in self.results if r["detected"]])
         self.handover_all.rows = handover_rows(sorted(self.results, key=lambda r: r["prn"]))

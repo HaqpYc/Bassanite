@@ -8,8 +8,10 @@ from collections.abc import Callable
 from nicegui import ElementFilter, ui
 
 from explain import function_source, load_panel, load_story, panel_names
-from stages import STAGES, Stage
-from state import REPO_ROOT, state
+from stages import STAGES, Stage, rel_path
+from state import state
+
+from bassanite.results import results_dir  # noqa: E402,I001  (state set sys.path)
 
 # `latex` renders $...$ and $$...$$ to MathML (via latex2mathml), so math works
 # offline without a JavaScript library.
@@ -91,15 +93,29 @@ def story(stage_key: str) -> None:
         md(text)
 
 
+@ui.refreshable
+def _output_files(stage: Stage) -> None:
+    if state.source is None:
+        return
+    folder = results_dir(state.source.path)
+    for pattern in stage.output_files:
+        matches = sorted(folder.glob(pattern))
+        mark = "✅" if matches else "—"
+        count = f" ({len(matches)} files)" if len(matches) > 1 else ""
+        ui.label(f"{mark} {rel_path(folder / pattern)}{count}") \
+            .classes("text-sm font-mono text-grey-8")
+
+
+def refresh_outputs() -> None:
+    """Re-list every stage's result files (after a run, or a new source)."""
+    _output_files.refresh()
+
+
 def _outputs(stage: Stage) -> None:
     with ui.card().classes("w-full").props("flat bordered"):
         ui.label("Hands over to the next step").classes("text-subtitle1 font-bold")
         ui.label(stage.hands_over)
-        for pattern in stage.output_files:
-            matches = sorted(REPO_ROOT.glob(pattern))
-            mark = "✅" if matches else "—"
-            count = f" ({len(matches)} files)" if len(matches) > 1 else ""
-            ui.label(f"{mark} {pattern}{count}").classes("text-sm font-mono text-grey-8")
+        _output_files(stage)
 
 
 def _nav(stage: Stage, go_to: Callable[[str], None]) -> None:

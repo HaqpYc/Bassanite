@@ -71,7 +71,9 @@ python 02_acquisition/scan_prns.py --iq path\to\file.dat --format complex64 \
 ```
 Outputs: a table on stdout, `scan_results.csv` (+ `scan_results.meta.json`: which
 recording and settings produced it), and `scan_plot.png` (peak/mean per PRN with the
-threshold line).
+threshold line), written to `results/<recording>/acquisition/` (git-ignored, one
+folder per recording; `--csv`/`--plot` choose other paths). The `scan_plot.png` in
+this folder is the `capture.bin` figure shown below.
 
 The search itself is in [`../bassanite/acquisition.py`](../bassanite/acquisition.py)
 (`correlation_surface()`, `acquire_prn()`, `scan()`, `write_results()`/`read_results()`);
@@ -142,7 +144,7 @@ floor of ~3.2 is what a simulation of pure noise gives for 10 ms over 81 × 4000
 (13 for 1 ms, 2.4 for 20 ms).
 
 **Next stage:** [`../03_tracking/`](../03_tracking/) seeds its loops from
-`scan_results.csv` (this stage's output) and locks 7 of these PRNs for the full 30 s
+`scan_results.csv` (this stage's output, in `results/capture/acquisition/`) and locks 7 of these PRNs for the full 30 s
 — the persistence claimed above, now confirmed by sustained carrier/code lock and a
 decodable 50 bps stream.
 

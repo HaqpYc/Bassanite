@@ -73,9 +73,11 @@ python 03_tracking/track.py --iq path\to\live.bin --format int8 --fs 4e6
 python 03_tracking/track.py --prn 1 --doppler 3750 --code-phase-chips 431.2
 ```
 
-Key flags: `--from-csv` (stage-02 seeds, default `02_acquisition/scan_results.csv`),
+Key flags: `--from-csv` (stage-02 seeds, default
+`results/<recording>/acquisition/scan_results.csv`),
 `--all` (track all 32, not just detected), `--prns 5,20,22` (only these detected
-PRNs), `--pll-bw`/`--dll-bw`, `--seconds`/`--skip-seconds`, `--out-dir`, `--no-plot`,
+PRNs), `--pll-bw`/`--dll-bw`, `--seconds`/`--skip-seconds`, `--out-dir` (default
+`results/<recording>/tracking/`, git-ignored), `--no-plot`,
 `--progress` (machine-readable `PROGRESS k n prn done_ms total_ms` lines, used by the
 web UI's **Track** tab, which runs this script as a separate process).
 
@@ -100,11 +102,13 @@ and settings produced it.
 - **From stage 01:** samples are loaded only through `common/iq_loader.py::load_iq`,
   exactly like stage 02 — so a bundled recording and a fresh live `hackrf_transfer`
   capture are handled identically (just `--iq`/`--format`/`--fs`).
-- **From stage 02:** seeds come from `02_acquisition/scan_results.csv`. We use the
+- **From stage 02:** seeds come from `results/<recording>/acquisition/scan_results.csv`. We use the
   sample-rate-independent `code_phase_chips` (converted to samples at our `fs`) and
   `doppler_hz` per detected PRN.
 - **To stage 04:** per PRN we write `track_PRN<nn>.npz` (below), plus
-  `tracking_summary.csv` and a diagnostic `track_PRN<nn>.png`.
+  `tracking_summary.csv` and a diagnostic `track_PRN<nn>.png`, into
+  `results/<recording>/tracking/`. (`track_PRN20.png` in this folder is the
+  `capture.bin` figure shown below.)
 
 ### `track_PRN<nn>.npz` contents
 | Array | Rate | Meaning |
@@ -163,7 +167,7 @@ a clean, frame-syncable bit stream.
 ```bash
 # spot-check the preamble spacing on the saved bits
 python -c "import numpy as np,glob; pre=np.array([1,0,0,0,1,0,1,1]); \
-[print(f) or (lambda b: print(' paired@300:', sum((i+300) in {j for j in range(len(b)-8) if np.array_equal(b[j:j+8],pre) or np.array_equal(b[j:j+8],1-pre)} for i in range(len(b)-8) if np.array_equal(b[i:i+8],pre) or np.array_equal(b[i:i+8],1-pre))))(np.load(f)['nav_bits'].astype(int)) for f in sorted(glob.glob('03_tracking/track_PRN*.npz'))]"
+[print(f) or (lambda b: print(' paired@300:', sum((i+300) in {j for j in range(len(b)-8) if np.array_equal(b[j:j+8],pre) or np.array_equal(b[j:j+8],1-pre)} for i in range(len(b)-8) if np.array_equal(b[i:i+8],pre) or np.array_equal(b[i:i+8],1-pre))))(np.load(f)['nav_bits'].astype(int)) for f in sorted(glob.glob('results/capture/tracking/track_PRN*.npz'))]"
 ```
 
 ---
