@@ -32,6 +32,12 @@ LOCK_QI_MAX = 0.3                 # |Q|/|I| below this = carrier phase-locked
 DEFAULT_PLL_BW = 12.0
 DEFAULT_DLL_BW = 1.0
 PROGRESS_EVERY_MS = 1000          # how often track_prn reports progress
+# Shortest signal that holds subframes 1, 2 and 3 (orbit and clock) each complete at
+# least once, whatever the phase of the 30 s frame. A subframe is 300 bits (6 s). In
+# the worst case the recording starts just after subframe 1 began, so subframe 1 is
+# caught in the next frame: 30 s to its start + 6 s. (A 30 s recording, 1499 bits,
+# never holds five complete subframes.) Pull-in time comes on top.
+MIN_SECONDS_FOR_EPHEMERIS = 36.0
 # Extra per-ms arrays track_prn(detail=True) returns (the loops' internals).
 DETAIL_KEYS = ("i_early", "q_early", "i_late", "q_late", "carr_err", "code_err")
 

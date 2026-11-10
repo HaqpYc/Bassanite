@@ -124,7 +124,7 @@ def device_info(timeout=10.0):
 
 @dataclass(frozen=True)
 class CaptureSettings:
-    seconds: float = 30.0
+    seconds: float = 60.0        # stage 04 needs >= 36 s (bassanite.tracking)
     fs: float = 4e6
     center_hz: float = GPS_L1_HZ
     lna_db: int = 32

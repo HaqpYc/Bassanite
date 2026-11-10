@@ -156,6 +156,15 @@ def test_one_shared_run_at_a_time_and_cancel_leaves_nothing(tracked, tmp_path):
 def test_estimate_and_command():
     src = IQSource("x.bin", "int8", 4e6)
     assert trk.estimate_minutes(30.0, 8) == pytest.approx(1.0)
+
+
+def test_default_tracks_the_whole_recording(tmp_path):
+    rec = tmp_path / "rec.bin"
+    rec.write_bytes(bytes(2 * 4_000_000 * 3))                  # 3 s of int8 at 4 MSPS
+    src = IQSource(rec, "int8", 4e6)
+    assert trk.seconds_to_track(src, 0.5, trk.TrackSettings()) == pytest.approx(2.5)
+    assert trk.seconds_to_track(src, 0.5, trk.TrackSettings(seconds=1.0)) == 1.0
+    assert "36 s" in trk.too_short_for_decode(30.0)
     cmd = trk.track_command(src, 2.0, 30.0, trk.TrackSettings(prns=(5, 20)), "seeds.csv",
                             "out")
     assert cmd[cmd.index("--skip-seconds") + 1] == "2.0"

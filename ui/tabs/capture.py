@@ -62,8 +62,9 @@ class CapturePanel:
                 ui.space()
                 ui.button(icon="refresh", on_click=self.detect) \
                     .props("flat round dense").tooltip("Look for the HackRF again")
-            ui.label("Records 30 s at 1575.42 MHz with the antenna powered (bias-tee on) and "
-                     "medium gains. Put the antenna outdoors with a clear view of the sky.") \
+            ui.label("Records 60 s at 1575.42 MHz with the antenna powered (bias-tee on) and "
+                     "medium gains: long enough to decode every satellite's orbit (step 4). "
+                     "Put the antenna outdoors with a clear view of the sky.") \
                 .classes("text-sm text-grey-8") \
                 .bind_visibility_from(state, "mode", value="beginner")
             self._build_settings()
@@ -89,7 +90,7 @@ class CapturePanel:
         with ui.row().classes("w-full items-end gap-4") \
                 .bind_visibility_from(state, "mode", value="expert"):
             ui.number("Duration", value=s.seconds, min=0.1, max=600, step=1, suffix="s",
-                      on_change=lambda e: self._set(seconds=float(e.value or 30))) \
+                      on_change=lambda e: self._set(seconds=float(e.value or 60))) \
                 .classes("w-28")
             ui.select({int(r): f"{r / 1e6:g} MSPS" for r in SAMPLE_RATES}, value=int(s.fs),
                       label="Sample rate",
@@ -114,7 +115,8 @@ class CapturePanel:
     def _refresh_buttons(self) -> None:
         ready = bool(self.device and self.device.found)
         idle = self.busy is None
-        self.record_button.set_text(f"Record {self.settings.seconds:g} s")
+        self.record_button.set_text(f"Record {self.settings.seconds:g} s "
+                                    f"({self.settings.expected_bytes / 1e6:,.0f} MB)")
         self.record_button.set_enabled(ready and idle)
         self.bias_button.set_enabled(ready and idle)
         self.preview_button.set_enabled(ready and self.busy in (None, "preview"))

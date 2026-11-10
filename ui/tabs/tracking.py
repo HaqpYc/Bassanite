@@ -20,7 +20,8 @@ import tabs.acquisition as acquisition  # noqa: E402  (its results_csv is the se
 from bassanite.provenance import read_meta  # noqa: E402,I001
 from bassanite.results import tracking_dir  # noqa: E402
 from bassanite.tracking import (DEFAULT_DLL_BW, DEFAULT_PLL_BW,  # noqa: E402
-                                LOCK_QI_MAX, MS_PER_BIT, SUMMARY_CSV, bit_sync_scores,
+                                LOCK_QI_MAX, MIN_SECONDS_FOR_EPHEMERIS, MS_PER_BIT,
+                                SUMMARY_CSV, bit_sync_scores,
                                 read_summary, summarize, track_file_name, track_prn)
 from bassanite.tracking import load_track as read_track_file  # noqa: E402
 from common.iq_loader import load_iq  # noqa: E402
@@ -31,7 +32,7 @@ from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording  # 
 TRACK_SCRIPT = REPO_ROOT / "03_tracking" / "track.py"
 RESULT_GLOBS = ("track_PRN*.npz", "track_PRN*.png", "tracking_summary.csv",
                 "tracking_summary.meta.json")
-DEFAULT_SECONDS = 30.0         # enough for stage 04: every subframe at least once
+DEFAULT_SECONDS = None         # the whole recording (see MIN_SECONDS_FOR_EPHEMERIS)
 SECONDS_PER_SECOND = 0.25      # measured: ~7 s to track 30 s of one satellite
 WINDOWS_MS = {20: "20 ms (one bit)", 100: "100 ms", 200: "200 ms", 1000: "1 s"}
 DEFAULT_WINDOW_MS = 200
@@ -47,7 +48,7 @@ PLAY_TICK_S = 0.2
 
 @dataclass(frozen=True)
 class TrackSettings:
-    seconds: float | None = None        # None: DEFAULT_SECONDS or the whole recording
+    seconds: float | None = DEFAULT_SECONDS    # None: the rest of the recording
     pll_bw: float = DEFAULT_PLL_BW
     dll_bw: float = DEFAULT_DLL_BW
     prns: tuple[int, ...] = ()          # empty: every detected satellite
@@ -55,7 +56,13 @@ class TrackSettings:
 
 def seconds_to_track(src: IQSource, start_s: float, s: TrackSettings) -> float:
     left = max(src.duration_s - start_s, 0.0)
-    return min(s.seconds or DEFAULT_SECONDS, left)
+    return left if not s.seconds else min(s.seconds, left)
+
+
+def too_short_for_decode(seconds: float) -> str:
+    return (f"⚠️ {seconds:.0f} s is too short for step 4: a satellite's orbit and clock "
+            f"(subframes 1–3) are all complete only in {MIN_SECONDS_FOR_EPHEMERIS:.0f} s "
+            "or more of signal. Record 60 s outdoors.")
 
 
 def estimate_minutes(seconds: float, n_prns: int) -> float:
@@ -608,9 +615,9 @@ class TrackingTab:
                 .bind_visibility_from(state, "mode", value="expert"):
             ui.label("Tracking settings").classes("text-subtitle1 font-bold")
             ui.label("Used by the next run.").classes("text-xs text-grey-7")
-            self.c_seconds = ui.number("Seconds to track", value=DEFAULT_SECONDS, min=1,
-                                       step=5, format="%.0f",
-                                       on_change=lambda e: self._set(seconds=e.value)) \
+            self.c_seconds = ui.number("Seconds to track (empty: all)",
+                                       value=DEFAULT_SECONDS, min=1, step=5, format="%.0f",
+                                       on_change=lambda e: self._set(seconds=e.value or None)) \
                 .classes("w-full")
             self.c_pll = ui.number("PLL bandwidth (Hz)", value=DEFAULT_PLL_BW, min=1,
                                    max=100, step=1,
@@ -766,8 +773,10 @@ class TrackingTab:
         n = len(self._run_prns())
         minutes = estimate_minutes(seconds, n)
         took = f"about {minutes:.0f} min" if minutes >= 1.5 else f"about {minutes * 60:.0f} s"
-        self.estimate_label.set_text(
-            f"Tracking {n} satellite{'s' if n != 1 else ''} over {seconds:.0f} s takes {took}.")
+        text = f"Tracking {n} satellite{'s' if n != 1 else ''} over {seconds:.0f} s takes {took}."
+        if seconds < MIN_SECONDS_FOR_EPHEMERIS:
+            text += " " + too_short_for_decode(seconds)
+        self.estimate_label.set_text(text)
 
     # --- running ------------------------------------------------------------------------
 
@@ -931,7 +940,9 @@ class TrackingTab:
             f"PLL {float(s.get('pll_bw_hz', DEFAULT_PLL_BW)):g} Hz, "
             f"DLL {float(s.get('dll_bw_hz', DEFAULT_DLL_BW)):g} Hz. "
             f"Results: {rel_path(track_dir(state.source))}/ "
-            "(tracking_summary.csv, track_PRNnn.npz)")
+            "(tracking_summary.csv, track_PRNnn.npz)"
+            + (" " + too_short_for_decode(seconds)
+               if seconds < MIN_SECONDS_FOR_EPHEMERIS else ""))
 
     def _show_cards(self) -> None:
         self.cards.clear()

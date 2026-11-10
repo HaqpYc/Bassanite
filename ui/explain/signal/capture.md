@@ -58,4 +58,6 @@ depends on the antenna's gain and on how much noise the HackRF itself adds.
 median is therefore not noise but something intermittent: interference.
 
 **Recording size.** $T$ seconds at $f_s$ samples per second, 2 bytes per sample
-(int8 I and Q): 30 s at 4 MSPS is $30 \times 4 \times 10^6 \times 2 = 240$ MB.
+(int8 I and Q): 60 s at 4 MSPS is $60 \times 4 \times 10^6 \times 2 = 480$ MB.
+Why 60 s: a satellite's orbit and clock are spread over subframes 1 to 3 of its 30 s
+frame, and a recording holds each of them complete only from about 36 s on.
