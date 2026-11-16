@@ -9,8 +9,7 @@ Q). Two formats show up in this project:
                   8-bit bytes  I0,Q0, I1,Q1, ...  (2 bytes per complex sample).
                   This is what the bundled `recordings/capture.bin` is.
   * "complex64"-- gr_complex / GNU Radio float format: interleaved 32-bit floats
-                  (8 bytes per complex sample). This is what GNSS-SDR `dump`s and
-                  what mini_gps_rx.py read.
+                  (8 bytes per complex sample). This is what GNSS-SDR `dump`s.
 
 This loader is the small "conditioning" step of the pipeline: it converts either
 on-disk format to a single in-memory representation (`np.complex64`, scaled to

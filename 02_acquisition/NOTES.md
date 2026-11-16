@@ -160,7 +160,7 @@ floor of ~3.2 is what a simulation of pure noise gives for 10 ms over 81 × 4000
 decodable 50 bps stream.
 
 ## Note vs. earlier project status
-`issues/clock_drift/INVESTIGATION.md` (dated 2026-05-30) analyzed this same file and
+An earlier investigation (2026-05-30, not in this repository) analyzed this same file and
 concluded "only ~1 solid SV (PRN 5); blocker is signal strength." This stage's
 verified scan finds **6+ genuine satellites** in that capture. The earlier scan
 correctly identified PRN 5 but under-reported the rest; the "too weak for a fix"

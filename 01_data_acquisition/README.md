@@ -33,8 +33,8 @@ At 4 MSPS, int8: 1 s ≈ 8 MB. The reference recording is 30 s ≈ 240 MB.
 The satellite signal does not arrive exactly at 1575.42 MHz:
 - **Satellite motion (Doppler):** up to ≈ **±5 kHz**.
 - **Receiver oscillator error:** the HackRF TCXO is ±20 ppm → up to ≈ **±31 kHz**
-  at L1. (Indoor GSM calibration proved unreliable — see
-  `../issues/clock_drift/solution_gsm_ppm_calibration/`.)
+  at L1. (Indoor GSM calibration proved unreliable. Stage 05 measures the error
+  directly, as the drift of the receiver clock: −0.2 ppm on the HackRF used here.)
 
 For *this* recording the offsets turned out small (detected Dopplers fall within
 ±4 kHz), so a ±10 kHz acquisition search is plenty. A cold/uncalibrated HackRF may

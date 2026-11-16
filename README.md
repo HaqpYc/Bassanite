@@ -23,19 +23,24 @@ in order:
 | 01 | [`01_data_acquisition/`](01_data_acquisition/) | Get raw IQ samples (live HackRF or a recording) | ✅ built |
 | 02 | [`02_acquisition/`](02_acquisition/) | **Scan the PRNs** — detect which satellites are present (code phase + Doppler) | ✅ built |
 | 03 | [`03_tracking/`](03_tracking/) | Follow each satellite (code DLL + carrier PLL) → 50 bps data stream | ✅ built |
-| 04 | `04_decoding/` | Bit & frame sync, decode the navigation message (ephemeris, clock, time) | ⏳ planned |
-| 05 | `05_positioning/` | Pseudoranges → solve receiver lat/lon/alt + clock bias (PVT) | ⏳ planned |
+| 04 | [`04_decoding/`](04_decoding/) | Frame sync, parity, decode the navigation message (ephemeris, clock, time) | ✅ built |
+| 05 | [`05_positioning/`](05_positioning/) | Pseudoranges → solve receiver lat/lon/height + clock (PVT) | ✅ built |
 
 Each stage's algorithm lives in the importable [`bassanite/`](bassanite/) package
 (used by both the command-line scripts in the numbered folders and the web UI):
 - [`bassanite/acquisition.py`](bassanite/acquisition.py) — stage 02 search.
 - [`bassanite/tracking.py`](bassanite/tracking.py) — stage 03 loops, bit sync, C/N0.
+- [`bassanite/navigation.py`](bassanite/navigation.py) — stage 04 frame sync, parity,
+  fields, time of week; also the message encoder the synthetic recordings use.
+- [`bassanite/position.py`](bassanite/position.py) — stage 05 satellite positions,
+  corrections, least-squares solver, DOP, the Doppler cross-check.
 - [`bassanite/results.py`](bassanite/results.py) — results go to
   `results/<recording>/<stage>/` (git-ignored), one folder per recording.
 - [`bassanite/provenance.py`](bassanite/provenance.py) — each result file gets a
   `<name>.meta.json` recording which recording and settings produced it.
 - [`bassanite/synthetic.py`](bassanite/synthetic.py) — synthetic recordings with known
-  satellites, for tests and for the UI.
+  satellites, for tests and for the UI; and a synthetic sky (real orbits, real
+  messages, a receiver at a known place) that checks the whole chain.
 
 Lower-level pieces, in the same package:
 - [`bassanite/ca_code.py`](bassanite/ca_code.py) — GPS L1 C/A Gold-code (PRN) generator.
@@ -59,26 +64,39 @@ python 02_acquisition/scan_prns.py
 
 # track every detected satellite (carrier PLL + code DLL) -> 50 bps nav bits
 python 03_tracking/track.py
+
+# read each satellite's message: orbit, clock correction, time
+python 04_decoding/decode.py
+
+# solve the position (needs 4 satellites with a complete message)
+python 05_positioning/solve.py
 ```
 
-Both `scan_prns.py` and `track.py` read a raw IQ recording (see
+Each script takes `--iq <recording>` and writes to `results/<recording>/<stage>/`.
+The default, `recordings/capture.bin`, is the 30 s reference recording: long enough
+for stages 02 to 04, but a position needs **at least 36 s** (the clock correction
+is sent once every 30 s).
+
+`scan_prns.py` and `track.py` read a raw IQ recording (see
 [`01_data_acquisition/`](01_data_acquisition/) for how to capture one with a HackRF
 One — recordings aren't checked into this repo, so bring your own). Requires
 Python 3.10+, numpy and matplotlib (`pip install -e ".[plots]"`). Runs natively on Windows; no WSL2 needed for offline
 analysis.
 
-## Web UI (in progress)
+## Web UI
 
 A local web app walks through the pipeline one tab per stage, with plain-language
 explanations and toggleable math. See [`docs/UI_PLAN.md`](docs/UI_PLAN.md) for the
-full plan. Built so far: the Overview, the **Signal** tab (spectrum, waterfall, ADC
-levels, live HackRF capture), the **Find satellites** tab (Gold codes step by step,
-the 32-PRN scan, the correlation surface, Try-it sliders, the persistence check) and
-the **Track** tab (run tracking, then replay each satellite's loops locking and its
-bits appearing; a PLL-bandwidth Try-it).
+full plan. The tabs: the Overview, **Signal** (spectrum, waterfall, ADC levels, live
+HackRF capture), **Find satellites** (Gold codes step by step, the 32-PRN scan, the
+correlation surface, Try-it sliders, the persistence check), **Track** (run
+tracking, then replay each satellite's loops locking and its bits appearing),
+**Decode** (the bit stream with its preambles, one subframe field by field, the
+time) and **Position** (the result, the scatter of the positions, the solver's
+iterations, the sky, and a Try-it that switches each correction or satellite off).
 
 ```bash
-pip install -r requirements.txt   # ideally in a virtual environment
+pip install -e ".[plots,ui,test]"   # ideally in a virtual environment
 python ui/app.py                  # opens http://localhost:8080
 python -m pytest ui               # UI tests
 ```
@@ -91,21 +109,33 @@ its window to stop the server.
 Explanation texts live in `ui/explain/<stage>/*.md` and are re-read on every page
 load, so you can edit them and refresh the browser.
 
-## Current status (2026-05-31)
+## Current status (2026-11-16)
 
-Stages 02 and 03 are working. Stage 02 acquisition finds **6+ genuine GPS
-satellites** in a 30 s outdoor capture (PRN 20, 5, 22, 21, 30, 14 strong; 7 and 15
-moderate), each verified by persistence. Stage 03 then **locks all 8 of those
-satellites for the full 30 s** at a healthy **37–43 dB-Hz C/N0** (carrier PLL +
-carrier-aided code DLL), demodulates the 50 bps data, and — the decisive check —
-recovers the GPS subframe **preamble repeating every 300 bits** on all 8. (PRN 7, the
-weakest, locks since 2026-11-10, when acquisition started handing tracking a refined
-Doppler.) That
-confirms signal presence and strength are **not** a blocker, and the nav data is
-cleanly decodable. The path to a fix now continues with stage 04 (frame sync +
-ephemeris decode) → stage 05 (PVT). See
-[`02_acquisition/NOTES.md`](02_acquisition/NOTES.md) and
-[`03_tracking/NOTES.md`](03_tracking/NOTES.md) for the evidence.
+All five stages work, and the chain has produced its **first real position**: from a
+60 s recording made with the HackRF and the patch antenna, 4 satellites tracked at
+39–43 dB-Hz, their messages decoded (parity 90/90 words each), and a position solved
+every 100 ms.
+
+- **Checked against a known answer.** A synthetic recording of five satellites on
+  real GPS orbits, received at a known place, goes through all five stages from raw
+  samples: the position comes out within 0.5 m horizontally and 1.5 m in height
+  (`python -m pytest tests -m slow`).
+- **Checked on the real recording.** The decoded time agrees with the recording's
+  timestamp, and the Doppler that tracking measured (never used by the solver)
+  matches the Doppler predicted from the position, time and orbits to 0.02 Hz on
+  all four satellites.
+- **Limits of that first fix.** Four satellites is the minimum, and they sat in the
+  same part of the sky (HDOP 12): single positions scatter by about 20 m. The
+  ionosphere is not corrected. A recording with six or more satellites spread across
+  the sky is the next step.
+
+Evidence and details, stage by stage: [`02_acquisition/NOTES.md`](02_acquisition/NOTES.md),
+[`03_tracking/NOTES.md`](03_tracking/NOTES.md), [`04_decoding/NOTES.md`](04_decoding/NOTES.md),
+[`05_positioning/NOTES.md`](05_positioning/NOTES.md).
+
+A self-contained lecture notebook,
+[`gnss_signal_theory_introduction.ipynb`](gnss_signal_theory_introduction.ipynb),
+walks through the same chain on a simulated signal, independently of the package.
 
 ## Hardware
 

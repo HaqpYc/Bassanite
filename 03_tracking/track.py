@@ -42,9 +42,7 @@ HOW IT CONNECTS TO THE OTHER STAGES (the file is the interface)
     tracking_summary.meta.json: which recording and settings) and a diagnostic PNG,
     into results/<recording>/tracking/. Stage 04 starts from these at frame sync.
 
-This productionizes the proven prototype in
-issues/clock_drift/solution_clean_capture/mini_gps_rx.py (its track()), reusing the
-validated Gold-code generator in ../bassanite/ca_code.py instead of a private copy.
+The Gold-code generator is the validated one in ../bassanite/ca_code.py.
 
 Example:
   python 03_tracking/track.py                       # all detected PRNs in capture.bin

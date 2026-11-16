@@ -2,7 +2,7 @@
 provenance.py -- remember which recording produced a stage's result files.
 
 Each stage writes a small JSON file next to its main result file, e.g.
-02_acquisition/scan_results.csv -> 02_acquisition/scan_results.meta.json:
+results/<recording>/acquisition/scan_results.csv -> .../scan_results.meta.json:
 
     {"stage": "acquisition", "created": "...", "source": {"path": ..., "format": ...,
      "fs": ..., "size_bytes": ...}, "settings": {...}}

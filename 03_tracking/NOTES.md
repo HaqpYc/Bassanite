@@ -160,7 +160,7 @@ Tracking the 8 PRNs stage 02 flagged: **all 8 lock solidly for the full 30 s.**
 PRN 7 locks since the refined Doppler handover (section 3); before, it started 139 Hz
 off and never did. C/N0 of **37–43 dB-Hz** on eight satellites is healthy — this **confirms the
 README's revision**: `capture.bin` is *not* weak, and signal strength is not the
-blocker (the old `issues/clock_drift/` "≤1 SV / too weak" story is dead).
+blocker (an earlier "≤1 SV / too weak" conclusion is superseded).
 
 > ![PRN 20 tracking](track_PRN20.png)
 
@@ -177,9 +177,8 @@ The test that noise cannot pass: the GPS subframe **preamble `10001011` (or its
 inverse) repeats every 300 bits (6 s)**. Checking the emitted `nav_bits`, **all 8
 locked PRNs show the preamble paired at exactly 300-bit spacing** (≈5 subframes over
 30 s), and all 8 pass the word parity check (IS-GPS-200) on all 48 words that the
-alignment check covers. (Before PRN 7 locked, it showed no preamble.) This independently reproduces the
-`issues/clock_drift/solution_clean_capture/mini_gps_rx.py` finding and hands stage 04
-a clean, frame-syncable bit stream.
+alignment check covers. (Before PRN 7 locked, it showed no preamble.) This hands stage 04 a clean, frame-syncable bit stream
+([`../04_decoding/NOTES.md`](../04_decoding/NOTES.md)).
 
 ```bash
 # spot-check the preamble spacing on the saved bits

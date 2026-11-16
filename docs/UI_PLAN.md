@@ -30,7 +30,7 @@ separate expert diagnostic tools (e.g. a bias-tee noise-floor check).
 │                         [Beginner ◉ Expert ○]  [∑ Show the math: off]  [?]   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Overview │ 1 Signal │ 2 Find satellites │ 3 Track │ 4 Decode │ 5 Position    │
-│          │    ✅    │        ✅         │   ✅    │    🔒    │     🔒        │
+│          │    ✅    │        ✅         │   ✅    │    ✅    │     ✅        │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  ┌─ Story strip (Beginner only) ───────────────────────────────────────────┐ │
 │  │ "Each satellite hides its signal 20 dB below the noise. Here we..."     │ │
@@ -114,7 +114,7 @@ files are the starting material.
   **"Capture live"** button.
 - **Result card:** the position on a map once stage 05 exists. Until then it shows
   the furthest stage reached.
-- **Run history:** past runs (`runs/<timestamp>/`) with source, settings and results,
+- **Run history:** past runs (one `results/<recording>/` folder each) with source, settings and results,
   and an "open" button.
 - **First-run checklist (Beginner):** HackRF detected? Bias-tee on? Antenna outdoors?
   Or skip all that and use the bundled recording.
@@ -190,7 +190,7 @@ bits appear."*
   - NWPR C/N0
   - bit sync
 
-### 4. Decode (stage 04, built when the backend exists)
+### 4. Decode (stage 04)
 - **Bit stream:** with the **preamble `10001011` highlighted every 300 bits**, a
   direct visual of frame sync.
 - **Subframe anatomy:** 10 words × 30 bits, TLM/HOW, and parity bits, coloured per field.
@@ -199,7 +199,7 @@ bits appear."*
 - **Math panels:** the parity (Hamming) equations, and what the ephemeris parameters
   mean physically.
 
-### 5. Position (stage 05, built when the backend exists)
+### 5. Position (stage 05)
 - **Sky plot:** azimuth/elevation of the satellites, computed from the ephemeris.
 - **Pseudorange table:** transmit time, receive time and range, plus the corrections
   applied.
@@ -212,34 +212,35 @@ bits appear."*
   - why 4 unknowns need 4 satellites
   - linearisation, least squares and DOP
 
-**Before stages 04–05 exist:** their tabs show 🔒 with the Story and Math panels
-only. The explanations can be written before the code, and they already teach the
-end of the chain.
-
 ---
 
 ## 4. Outputs and history
-- Each run is saved to `runs/<timestamp>/` with `config.json` plus the stage files.
-  (Section 7, B3, recommends keying these folders by recording.)
-- Exports per stage: CSV, NPZ and PNG, plus the IQ recording for live captures.
-  Stage 05 adds KML/GPX.
-- **Session report:** a one-click HTML export of the Overview and the key plots.
+- Each stage writes to `results/<recording>/<stage>/` (git-ignored), one folder per
+  recording, with a provenance file naming the recording and the settings
+  (`bassanite/results.py`, `bassanite/provenance.py`). The Overview's run history
+  lists these folders.
+- A result older than the result of the step before it is flagged (steps 4 and 5):
+  the earlier step was run again.
+- Not built: exports (KML/GPX of the position, a one-click HTML session report).
+  See section 8.
 
 ---
 
-## 5. Backend changes the UI needs
+## 5. Backend changes the UI needed (all done)
 
-| Need | Current state | Change |
-|---|---|---|
-| Import stages from the UI | Folders start with digits (`02_acquisition`), so `import` fails | Move each stage's core functions into importable modules (e.g. `bassanite/acquisition.py`); keep the numbered folders as CLI and notes |
-| Correlation surface plot | `acquire_prn()` keeps only the best cell | Optionally return the full `acc` grid (Doppler × code phase) |
-| E/P/L triangle, discriminator plots | `track_prn()` returns prompt, Doppler and code phase only | Also return E/L correlators and the discriminator outputs |
-| Progress bar / no frozen UI | Tracking loops for about 30k epochs per PRN and needs about 1 GB for 30 s | Add a `progress` callback, run it in a background process, default to a shorter window in Beginner mode |
-| Responsive plots | — | Never send raw samples to the browser. Decimate, and render the waterfall as an image on the server |
-| Live waterfall | Capture goes to a file only | Pipe `hackrf_transfer -r -` (or use SoapySDR from radioconda) into a rolling FFT |
+| Need | What was done |
+|---|---|
+| Import stages from the UI | The algorithms live in the `bassanite/` package; the numbered folders hold the command lines and the notes |
+| Correlation surface plot | `acquire_prn(return_surface=True)` |
+| E/P/L triangle, discriminator plots | `track_prn(detail=True)` returns the Early/Late correlators and both discriminators |
+| Progress bar, no frozen UI | Tracking runs as a separate process (`track.py --progress`) and reads the recording block by block |
+| Responsive plots | Curves are decimated before they go to the browser; the waterfall is computed on the server |
+| Live view | The live preview records short stretches to a temporary file (`hackrf_transfer -r -` corrupts binary data on Windows) |
+| Stages 04 and 05 | `bassanite/navigation.py`, `bassanite/position.py`; both run in well under a second, in the server process |
 
-The existing file interface (`scan_results.csv`, `track_PRN*.npz`) stays the
-contract between stages, so the UI and the command-line scripts stay interchangeable.
+The files (`scan_results.csv`, `track_PRN*.npz`, `navigation.json`, `fix.json`) are
+the contract between stages, so the UI and the command-line scripts stay
+interchangeable.
 
 ### Code layout
 - `ui/app.py`: the app shell (header, toggles, tabs)
@@ -262,12 +263,14 @@ contract between stages, so the UI and the command-line scripts stay interchange
 5. ✅ **Tracking tab** with the time scrubber (play, step by bit, window length), the
    satellite cards, the PLL-bandwidth Try-it, and tracking run as a separate process
    (`track.py --progress`) whose results replace the old ones only on success.
-6. **Stages 04 and 05:** each backend stage ships with its tab, following the
-   five-block layout above.
-   - Before stage 04: B1, B3 and B4 of section 7 (a longer recording, one results
-     folder per recording, file formats defined in one place).
-   - With the longer recording: B2 (read the recording in blocks).
-   - The other items of section 7 can be done at any time.
+6. ✅ **Stages 04 and 05**, each with its tab:
+   - **Decode:** the bit stream (300 bits per row, preambles lined up, chance matches
+     marked), one subframe field by field, the field table, the time of week.
+   - **Position:** the result, the scatter and time series of the single positions,
+     the pseudorange table, the solver's iterations, the sky and DOP, the Try-it
+     (switch a correction or a satellite off), the Doppler check, the map (off until
+     switched on, because it loads tiles from openstreetmap.org).
+   - The Overview's result card shows the position.
 
 ---
 
@@ -315,3 +318,25 @@ always cuts one. Subframes 1, 2 and 3 are each complete at least once only from
 | U3 ✅ | **A despreading demo between steps 1 and 2:** the spectrum of the raw samples, then of the same samples multiplied by the aligned code, where a spike appears at the Doppler frequency | The Signal tab ends on "no FFT size can make it appear". This shows the moment it does appear, and why the Doppler search is a frequency search |
 | U4 ✅ | **Track tab: a block diagram of the two loops** as the tab's map (like the shift-register drawing), **and "break it" switches:** `atan2` instead of `atan`, carrier aiding off, a rounded number of samples per code period | These replay the real bugs described in `03_tracking/NOTES.md`. Watching the lock fail teaches more than the bandwidth slider alone. Needs B6 |
 | U5 ✅ | **Make the synthetic signal a selectable source** (move `ui/tests/synthetic.py` into `bassanite/`), with a signal-strength slider | A simulator with known truth shows a satellite sinking into the noise, and gives stages 04 and 05 an end-to-end test with a known answer (known ephemeris, known position) |
+
+---
+
+## 8. What is next (2026-11-16)
+
+Stages 04 and 05 and their tabs were built on 2026-11-16. Each item below says what
+to do and how to know it is done. The most useful come first.
+
+| # | Item | What to do | Done when |
+|---|---|---|---|
+| N1 | **Look at the two new tabs in a browser** | They are tested with NiceGUI's simulated user only (the test server was stopped for lack of memory before a browser check). Start `python ui/app.py --no-browser --port 8081`, load `capture_20261110_143115.bin`, open Decode and Position. Check: the bit-stream colours and subframe numbers; that the field names of "One subframe, field by field" sit above their bits without overlapping (`anatomy_figure`, `yshift`); the sky plot (north up, east to the right); the map switch; the Try-it | Every figure reads correctly at 1280 px and at phone width |
+| N2 | **A recording with 6 or more satellites** | 60 s or more, antenna outdoors with an open sky. On 2026-11-16 the antenna, where it stood, saw 2 satellites and interference bursts. Then scan, track, decode, solve | Residuals are shown (more than 4 satellites), HDOP below 3, and "leave a satellite out" works in the Try-it |
+| N3 | **Compare with the true antenna position** | `python 05_positioning/solve.py --iq <file> --truth LAT,LON,HEIGHT` (height above the ellipsoid) | The error is written in `05_positioning/NOTES.md`, without the coordinates |
+| N4 | **Detections that can be trusted** | The threshold is a fixed 5. (a) In `capture_20261110_223146.bin` (bursts) every one of the 32 PRNs scores 7 to 8 and is "detected": in `bassanite/acquisition.py::scan`, use `max(threshold, 1.5 x median peak/mean of the PRNs searched)` when at least 16 PRNs are searched, store the value used in the provenance file, and draw it in the bar chart. (b) In `capture_20261110_143115.bin` one noise peak of 5.5 passes any such threshold: once tracking has run, show a detection that did not lock as "not confirmed" in the Find satellites status and on the Overview | (a) That bursty recording gives 1 detection and `capture.bin` still gives 8, with tests. (b) The Overview says "5 detected, 4 confirmed by tracking" for the second recording |
+| N5 | **The synthetic sky as a source** | Offer `bassanite.synthetic.write_sky_recording` in the source dialog (40 s at 4 MSPS is 320 MB and takes about a minute to write: run it like a recording, with progress). The Position tab already compares with the truth file | A user without hardware goes from the dialog to a position, and the tab shows the error against the truth |
+| N6 | **Smoother code timing** | Save the carrier phase per millisecond in the track files (`ChannelTracker`: accumulate `carr_f × blksize / fs`), then smooth each pseudorange with it (Hatch filter) in `bassanite/position.py` | On the synthetic sky the scatter of one position drops well below the 3 m it has now, and the mean stays unbiased |
+| N7 | **Exports** | KML or GPX of `fixes.csv`; a one-page HTML report of the Overview and the key plots | A button on the Position tab writes the file next to `fix.json` |
+| N8 | **The 22 Hz question** | The receiver's frequency error measured from the Doppler (+310 Hz) and from the clock drift (+332 Hz) differ. Check whether the HackRF's tuning step explains it: compare several recordings, or record a known carrier | `05_positioning/NOTES.md` states the cause, or rules the tuner out |
+| N9 | **Small tidying** | `components._placeholder` and `_BUILD_STEP` are unused now that every stage is built. `ui/tabs/tracking.py` and `ui/tabs/acquisition.py` are over 1,200 lines: their figure builders could move to modules of their own | No behaviour changes; the tests pass unchanged |
+
+Not possible with short recordings: the ionosphere correction. Its model is
+broadcast once per 12.5 minutes (6 GB at 4 MSPS).
