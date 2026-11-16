@@ -2,10 +2,9 @@
 recording and the bias-tee check. Receive only."""
 from __future__ import annotations
 
-import asyncio
 import tempfile
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +12,7 @@ from nicegui import context, run, ui
 
 from state import REPO_ROOT, IQSource, state
 
+from bassanite.tracking import MIN_SECONDS_FOR_EPHEMERIS
 from bassanite.hackrf import (DEVICE_LOCK, LNA_STEPS, SAMPLE_RATES, Capture,  # noqa: I001
                            CaptureSettings, DeviceInfo, bias_tee_check, capture_blocking,
                            device_info, recording_path, write_sidecar)
@@ -38,6 +38,100 @@ def bias_verdict(rise_db: float) -> tuple[str, str]:
                  "antenna an active one, and does this HackRF's bias-tee work?")
 
 
+def capture_summary(s: CaptureSettings) -> str:
+    """The Beginner-mode sentence describing what Record will do with these settings."""
+    default = CaptureSettings()
+    power = ("with the antenna powered (bias-tee on)" if s.bias_tee
+             else "with the antenna power OFF (bias-tee off)")
+    gains = f"LNA {s.lna_db} dB, VGA {s.vga_db} dB" + (", RF amplifier on" if s.amp else "")
+    medium = "medium " if (s.lna_db, s.vga_db, s.amp) == \
+        (default.lna_db, default.vga_db, default.amp) else ""
+    if s.seconds >= MIN_SECONDS_FOR_EPHEMERIS:
+        length = "long enough to decode every satellite's orbit (step 4)"
+    else:
+        length = (f"too short for step 4, which needs at least "
+                  f"{MIN_SECONDS_FOR_EPHEMERIS:.0f} s")
+    text = (f"Records {s.seconds:g} s at {s.center_hz / 1e6:.2f} MHz {power} and "
+            f"{medium}gains ({gains}): {length}.")
+    if not s.bias_tee:
+        text += " ⚠️ Without power, an active antenna receives no satellites."
+    text += " Put the antenna outdoors with a clear view of the sky."
+    if s != default:
+        text += " These settings were changed in Expert mode."
+    return text
+
+
+# The server's recording, shared by every browser tab (like tabs.tracking._current): it
+# keeps going if the page reloads, and whichever page notices that it ended settles it.
+# recordings_version tells the pages that a recording ended; last_message is its outcome.
+@dataclass(eq=False)
+class Recording:
+    capture: Capture
+    settings: CaptureSettings
+    path: Path
+    device: DeviceInfo | None
+
+
+_current: Recording | None = None
+recordings_version = 0
+last_message = ""
+last_became_source = False
+
+
+def current_recording() -> Recording | None:
+    return _current
+
+
+def begin_recording(settings: CaptureSettings, device: DeviceInfo | None,
+                    path: Path, capture_cls=Capture) -> Recording:
+    """Start recording. The caller holds DEVICE_LOCK; it is released here if starting fails."""
+    global _current
+    try:
+        capture = capture_cls(settings, path).start()
+    except BaseException:
+        DEVICE_LOCK.release()
+        raise
+    _current = Recording(capture, settings, path, device)
+    return _current
+
+
+def _saved_message(path: Path) -> str:
+    try:
+        shown = path.relative_to(REPO_ROOT)
+    except ValueError:
+        shown = path
+    return (f"✅ Saved {shown} ({path.stat().st_size / 1e6:.0f} MB). It is now the "
+            "signal being analysed; run the next steps on it.")
+
+
+def settle_recording() -> bool:
+    """Once the current recording's process has ended: save it as the source (or delete
+    the partial file), release the HackRF and tell the pages. Safe to call twice.
+    Returns True if it settled one."""
+    global _current, recordings_version, last_message, last_became_source
+    r = _current
+    if r is None or r.capture.poll() is None:
+        return False
+    _current = None
+    message, became_source = "", False
+    try:
+        if r.capture.succeeded():
+            try:
+                write_sidecar(r.path, r.settings, r.device)
+                state.source = IQSource(r.path, "int8", r.settings.fs, r.settings.center_hz)
+                message, became_source = _saved_message(r.path), True
+            except Exception as err:       # e.g. disk full: still free the HackRF below
+                message = f"❌ The recording could not be saved: {err}"
+        else:
+            message = f"❌ {r.capture.failure_message()}"
+            r.path.unlink(missing_ok=True)   # don't leave a partial recording behind
+    finally:
+        DEVICE_LOCK.release()
+        last_message, last_became_source = message, became_source
+        recordings_version += 1
+    return True
+
+
 class CapturePanel:
     """One instance per browser tab. `on_recorded` is called after a new recording
     becomes the current source."""
@@ -47,9 +141,11 @@ class CapturePanel:
         self.on_recorded = on_recorded
         self.settings = CaptureSettings()
         self.device: DeviceInfo | None = None
-        self.capture: Capture | None = None
         self.previewing = False
         self.busy: str | None = None          # "preview" | "record" | "bias"
+        self._seen_version = recordings_version   # don't replay an older recording's message
+        self._detecting = False
+        self._waiting_for_device = False
 
     # --- layout --------------------------------------------------------------------------
 
@@ -62,10 +158,7 @@ class CapturePanel:
                 ui.space()
                 ui.button(icon="refresh", on_click=self.detect) \
                     .props("flat round dense").tooltip("Look for the HackRF again")
-            ui.label("Records 60 s at 1575.42 MHz with the antenna powered (bias-tee on) and "
-                     "medium gains: long enough to decode every satellite's orbit (step 4). "
-                     "Put the antenna outdoors with a clear view of the sky.") \
-                .classes("text-sm text-grey-8") \
+            self.summary_label = ui.label().classes("text-sm text-grey-8") \
                 .bind_visibility_from(state, "mode", value="beginner")
             self._build_settings()
             with ui.row().classes("items-center gap-2"):
@@ -84,6 +177,7 @@ class CapturePanel:
         self._refresh_buttons()
         context.client.on_disconnect(self._stop_preview)
         ui.timer(0.1, self.detect, once=True)
+        ui.timer(0.25, self._tick)
 
     def _build_settings(self) -> None:
         s = self.settings
@@ -115,6 +209,7 @@ class CapturePanel:
     def _refresh_buttons(self) -> None:
         ready = bool(self.device and self.device.found)
         idle = self.busy is None
+        self.summary_label.set_text(capture_summary(self.settings))
         self.record_button.set_text(f"Record {self.settings.seconds:g} s "
                                     f"({self.settings.expected_bytes / 1e6:,.0f} MB)")
         self.record_button.set_enabled(ready and idle)
@@ -132,10 +227,14 @@ class CapturePanel:
     # --- device ------------------------------------------------------------------------------
 
     async def detect(self) -> None:
-        if DEVICE_LOCK.locked():
+        if DEVICE_LOCK.locked() or self._detecting:
             return                      # hackrf_info can't open a device that is in use
-        self.device_label.set_text("Looking for a HackRF…")
-        self.device = await run.io_bound(device_info)
+        self._detecting = True
+        try:
+            self.device_label.set_text("Looking for a HackRF…")
+            self.device = await run.io_bound(device_info)
+        finally:
+            self._detecting = False
         d = self.device
         if d.found:
             self.device_label.set_text(f"✅ {d.board or 'HackRF'} · serial …{d.serial[-6:]} · "
@@ -143,6 +242,46 @@ class CapturePanel:
         else:
             self.device_label.set_text(f"❌ {d.message}")
         self._refresh_buttons()
+
+    # --- following the server's recording ----------------------------------------------------
+
+    async def _tick(self) -> None:
+        """Cheap, every 0.25 s on every page: show the recording whichever page started
+        it, settle it when it ended, and notice when the HackRF is used by another page."""
+        r = current_recording()
+        if r is not None and r.capture.poll() is not None:
+            settle_recording()
+            r = current_recording()
+        if r is not None:
+            self._show_recording(r)
+            return
+        if self.busy == "record":
+            self._set_busy(None)
+        if self._seen_version != recordings_version:
+            self._seen_version = recordings_version
+            self.status.set_text(last_message)
+            if last_became_source:
+                self.on_recorded()
+            self._refresh_buttons()
+        if DEVICE_LOCK.locked():
+            if self.busy is None:       # another page's preview or bias-tee check
+                self._waiting_for_device = True
+                if self.device is None:
+                    self.device_label.set_text("The HackRF is in use by another page.")
+        elif self._waiting_for_device:
+            self._waiting_for_device = False
+            await self.detect()
+
+    def _show_recording(self, r: Recording) -> None:
+        if self.busy != "record":
+            self._waiting_for_device = True      # look for the device when it ends
+            self._set_busy("record")
+            if self.device is None:
+                self.device_label.set_text("The HackRF is recording.")
+        frac = r.capture.progress()
+        self.progress.set_value(frac)
+        self.status.set_text(f"Recording… {frac * r.settings.seconds:.0f} of "
+                             f"{r.settings.seconds:g} s → {r.path.name}")
 
     # --- live preview ------------------------------------------------------------------------
 
@@ -184,39 +323,17 @@ class CapturePanel:
         if not DEVICE_LOCK.acquire(blocking=False):
             ui.notify("The HackRF is busy.", type="warning")
             return
-        s = self.settings
-        path = recording_path(RECORDINGS_DIR)
         try:
-            try:
-                self.capture = Capture(s, path).start()
-            except (FileNotFoundError, ValueError) as err:
-                self.status.set_text(f"❌ {err}")
-                return
-            self._set_busy("record")
-            while self.capture.poll() is None:
-                frac = self.capture.progress()
-                self.progress.set_value(frac)
-                self.status.set_text(f"Recording… {frac * s.seconds:.0f} of {s.seconds:g} s "
-                                     f"→ {path.name}")
-                await asyncio.sleep(0.25)
-            if self.capture.succeeded():
-                write_sidecar(path, s, self.device)
-                state.source = IQSource(path, "int8", s.fs, s.center_hz)
-                self.status.set_text(f"✅ Saved {path.relative_to(REPO_ROOT)} "
-                                     f"({path.stat().st_size / 1e6:.0f} MB). It is now the "
-                                     "signal being analysed; run the next steps on it.")
-                self.on_recorded()
-            else:
-                self.status.set_text(f"❌ {self.capture.failure_message()}")
-                path.unlink(missing_ok=True)   # don't leave a partial recording behind
-        finally:
-            self.capture = None
-            DEVICE_LOCK.release()
-            self._set_busy(None)
+            r = begin_recording(self.settings, self.device, recording_path(RECORDINGS_DIR))
+        except (FileNotFoundError, ValueError) as err:
+            self.status.set_text(f"❌ {err}")
+            return
+        self._show_recording(r)       # the timer follows it from here, on every page
 
     def cancel(self) -> None:
-        if self.capture is not None:
-            self.capture.cancel()
+        r = current_recording()
+        if r is not None:
+            r.capture.cancel()
 
     # --- bias-tee check ----------------------------------------------------------------------
 
