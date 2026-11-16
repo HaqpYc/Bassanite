@@ -4,17 +4,18 @@ code: bassanite/ca_code.py::register_states, ui/tabs/acquisition.py::circular_co
 ---
 ## Intuition
 
-A satellite's code looks random, but a very simple machine makes it: two
-**10-stage shift registers**, G1 and G2. At every tick each register moves its bits
-one stage to the right, and stage 1 receives the XOR of a few stages (the dots on
-the line above each register). With the right choice of stages, a 10-stage register
-visits all 2¹⁰ − 1 = **1023** non-zero states before it repeats. That is why the
-code is 1023 chips long.
+A satellite's code looks random, but the two shift registers above make it, and
+they are a very simple machine.
 
-Each chip is G1's last stage, XORed with **two stages of G2**. Which two stages
-(amber) is the only thing that differs from one satellite to the next. Picking
-different stages amounts to delaying G2 by a different amount, so every satellite
-gets its own mix.
+**Why 1023 chips?** A register of 10 stages can hold 2¹⁰ = 1024 different patterns
+of 0s and 1s. The stages that feed stage 1 (the dots) are chosen so that the register
+goes through all of them except "all zeros" before it comes back to its start:
+2¹⁰ − 1 = **1023** steps. The code then repeats.
+
+**Why two registers?** G1 alone would give every satellite the same code. XORing
+two stages of G2 gives the same sequence as G2's last stage, only delayed, and each
+pair of stages (amber) gives a different delay. So every satellite sends G1 mixed
+with a differently delayed G2: its own code.
 
 Why this matters: slide a code past a copy of itself and add up chip × chip. The sum
 is huge (1023) only when the two are perfectly aligned. At any other shift, and

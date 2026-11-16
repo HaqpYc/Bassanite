@@ -5,10 +5,12 @@ import json
 
 import numpy as np
 import pytest
+from nicegui import ui
 from nicegui.testing import User
 
 import tabs.acquisition as acq
-from bassanite.acquisition import acquire_prn, cn0_from_peak, code_drift_chips_per_s
+from bassanite.acquisition import (acquire_prn, cn0_from_peak, code_drift_chips_per_s,
+                                   scan_seconds)
 from bassanite.ca_code import CODE_LENGTH, G2_TAPS, ca_code, register_states
 from state import IQSource, state
 from bassanite.synthetic import CODE_PHASE_SAMP, DOPPLER, FS, PRN, synthetic_gps, write_int8
@@ -102,7 +104,8 @@ def test_scan_results_go_to_the_recordings_own_folder(recording, results_root):
 
 
 def test_window_never_runs_past_the_end(recording):
-    assert acq.window_start(recording, 10.0, 10) == pytest.approx(0.06 - 0.015)
+    # room for the 40 ms Doppler refinement too: scan_seconds(10) = 45 ms
+    assert acq.window_start(recording, 10.0, 10) == pytest.approx(0.06 - 0.045)
     with pytest.raises(ValueError, match="too short"):
         acq.load_window(recording, 0.0, 100)
 
@@ -154,13 +157,28 @@ def test_persistence_measures_the_drift_the_doppler_predicts(tmp_path):
     calls = []
     p = acq.persistence(src, acq.ScanSettings(dop_range_hz=5000), [PRN, 1], [PRN],
                         points=4, progress=lambda d, t: calls.append((d, t)))
-    assert p["times"].tolist() == [0.0, 0.328, 0.657, 0.985]
+    ms = acq.ScanSettings().ms
+    assert p["times"].tolist() == [0.0, 0.318, 0.637, 0.955]
+    # the last window still holds the whole 40 ms refinement
+    assert p["times"][-1] + scan_seconds(ms) <= 1.0 + 1e-9
     assert calls[-1] == (8, 8)
     d = p["drift"][PRN]
     assert d["predicted"] == pytest.approx(float(code_drift_chips_per_s(doppler)), abs=0.05)
     assert d["measured"] == pytest.approx(d["predicted"], abs=0.3)
     assert abs(d["doppler"] - doppler) <= 20
     assert 1 not in p["drift"]                    # no fit for undetected PRNs
+
+
+def test_persistence_plot_keeps_every_point_where_the_code_phase_wraps():
+    chips = [1010.0, 1020.0, 7.0, 17.0, 27.0]
+    p = {"times": np.array([0.0, 1.0, 2.0, 3.0, 4.0]),
+         "tracks": {PRN: {"doppler": [0.0] * 5, "chips": chips, "ratio": [9.0] * 5}}}
+    _, fig = acq.persistence_figures(p, [PRN])
+    trace = fig["data"][0]
+    assert len(trace["x"]) == len(trace["y"])
+    assert [c for c in trace["y"] if c is not None] == chips      # nothing dropped
+    assert trace["y"].index(None) == trace["y"].index(1020.0) + 1  # the line breaks at the wrap
+    assert trace["y"][trace["y"].index(None) + 1] == 7.0
 
 
 # --- the page ----------------------------------------------------------------------------------
@@ -176,7 +194,11 @@ async def test_tab_steps_the_code_and_scans_without_touching_real_results(
         await user.open("/")
         await user.should_see("Meet the codes")
         await user.should_see("Chip 1 of 1023", retries=10)
-        user.find("Next chip").click()
+        # The words a first-time reader needs are defined before the diagram uses them.
+        for term in ("is called a **chip**", "*shift registers*", "is **XOR**",
+                     "The code it produces"):
+            await user.should_see(term)
+        user.find(kind=ui.button, content="Next chip").click()   # the text names it too
         await user.should_see("Chip 2 of 1023")
         await user.should_see("Not scanned yet", retries=20)
 

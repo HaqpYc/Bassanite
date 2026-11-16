@@ -33,7 +33,9 @@ TRACK_SCRIPT = REPO_ROOT / "03_tracking" / "track.py"
 RESULT_GLOBS = ("track_PRN*.npz", "track_PRN*.png", "tracking_summary.csv",
                 "tracking_summary.meta.json")
 DEFAULT_SECONDS = None         # the whole recording (see MIN_SECONDS_FOR_EPHEMERIS)
-SECONDS_PER_SECOND = 0.25      # measured: ~7 s to track 30 s of one satellite
+# Run time per second of signal and per satellite. Measured: 0.24 s for the loop
+# alone, 0.28 s with the files written, up to 0.38 s while the browser is busy.
+SECONDS_PER_SECOND = 0.3
 WINDOWS_MS = {20: "20 ms (one bit)", 100: "100 ms", 200: "200 ms", 1000: "1 s"}
 DEFAULT_WINDOW_MS = 200
 CURVE_POINTS = 1500            # points per full-length curve sent to the browser
@@ -63,6 +65,23 @@ def too_short_for_decode(seconds: float) -> str:
     return (f"⚠️ {seconds:.0f} s is too short for step 4: a satellite's orbit and clock "
             f"(subframes 1–3) are all complete only in {MIN_SECONDS_FOR_EPHEMERIS:.0f} s "
             "or more of signal. Record 60 s outdoors.")
+
+
+def changed_settings_note(s: TrackSettings, n_detected: int) -> str:
+    """A sentence (with a leading space) naming the settings that differ from the
+    defaults, so Beginner mode, where the controls are hidden, still says so.
+    Empty when nothing differs."""
+    default = TrackSettings()
+    parts = []
+    if s.seconds != default.seconds:
+        parts.append(f"{s.seconds:g} s")
+    if s.pll_bw != default.pll_bw:
+        parts.append(f"PLL {s.pll_bw:g} Hz")
+    if s.dll_bw != default.dll_bw:
+        parts.append(f"DLL {s.dll_bw:g} Hz")
+    if s.prns != default.prns:
+        parts.append(f"{len(s.prns)} of {n_detected} satellites")
+    return f" Settings changed in Expert mode: {', '.join(parts)}." if parts else ""
 
 
 def estimate_minutes(seconds: float, n_prns: int) -> float:
@@ -108,6 +127,7 @@ class Track:
     seed_code_phase: float
     detail: dict | None = None        # Early/Late and discriminators, if saved
     coarse_doppler: float | None = None   # acquisition's search-grid Doppler
+    seed_refined: bool = False        # the run skipped the pull-in Doppler search
 
     @property
     def n_ms(self) -> int:
@@ -128,7 +148,7 @@ def load_track(path: Path, t0: float) -> Track:
             d["prn"], d["fs"], t0, d["i_prompt"], d["q_prompt"], d["doppler_hz"],
             d["code_phase_samp"], d["nav_bits"], d["cn0_dbhz"], d["bit_offset"],
             d["doppler_seed_hz"], d["code_phase_samp_seed"], d["detail"],
-            d["doppler_coarse_hz"])
+            d["doppler_coarse_hz"], d["seed_refined"])
     return _track_cache[key]
 
 
@@ -191,10 +211,13 @@ def bit_at(tr: Track, ms: int) -> int:
 # --- try it: PLL bandwidth ---------------------------------------------------------------------
 
 def try_pll(x: np.ndarray, fs: float, prn: int, code_phase: float, doppler: float,
-            pll_bw: float = DEFAULT_PLL_BW, options: TrackOptions = TrackOptions()) -> dict:
+            pll_bw: float = DEFAULT_PLL_BW, options: TrackOptions = TrackOptions(),
+            refine: bool = True) -> dict:
     """Track a short stretch with another PLL bandwidth (or with a bug switched on)
-    and judge the lock."""
-    tr = track_prn(x, fs, prn, code_phase, doppler, pll_bw=pll_bw, options=options)
+    and judge the lock. `refine`: run the pull-in Doppler search first (False when
+    `doppler` was already refined, as in the real run)."""
+    tr = track_prn(x, fs, prn, code_phase, doppler, pll_bw=pll_bw, options=options,
+                   refine=refine)
     i, q = tr["i_prompt"], tr["q_prompt"]
     settled = slice(min(TRY_SETTLE_MS, len(i) // 2), None)
     qi = float(np.median(np.abs(q[settled])) / (np.median(np.abs(i[settled])) + 1e-9))
@@ -237,7 +260,13 @@ def settle_run() -> tuple[str, str] | None:
         return None
     _current = None
     if r.succeeded():
-        moved = r.finish()
+        try:
+            moved = r.finish()
+        except OSError as err:      # e.g. a file locked by OneDrive or a viewer
+            r.cleanup()
+            results_version += 1    # pages re-read whatever is on disk now
+            return "negative", (f"Tracking finished, but its results could not be moved "
+                                f"into {r.target}: {err}")
         r.cleanup()
         results_version += 1
         n = len([m for m in moved if m.endswith(".npz")])
@@ -323,13 +352,19 @@ class TrackingRun:
                 and summary_path(self.out_dir).is_file())
 
     def finish(self) -> list[str]:
-        """Move the results into place. Returns the file names moved."""
+        """Move the results into place, then delete result files of an earlier run
+        that this run did not write (they would sit next to a summary that no longer
+        lists them). Returns the file names moved."""
         moved = []
         self.target.mkdir(parents=True, exist_ok=True)
         for pattern in RESULT_GLOBS:
             for f in sorted(self.out_dir.glob(pattern)):
                 shutil.move(str(f), str(self.target / f.name))
                 moved.append(f.name)
+        for pattern in RESULT_GLOBS:
+            for old in self.target.glob(pattern):
+                if old.name not in moved:
+                    old.unlink()
         return moved
 
     def cancel(self) -> None:
@@ -568,8 +603,13 @@ _BLOCKS = {
 # What a "break it" switch breaks: (block, label shown in red under it).
 BROKEN_BLOCKS = {
     "atan2": ("costas", "atan2: chases every bit flip"),
-    "rounded": ("code_nco", "rounded 4000-sample period"),
+    "rounded": ("code_nco", "rounded {spms}-sample period"),
 }
+
+
+def samples_per_ms(tr: Track) -> int:
+    """Samples in one code period (1 ms) at the track's sample rate."""
+    return int(round(tr.fs * 1e-3))
 
 
 def _box(key: str, broken: bool) -> str:
@@ -596,11 +636,12 @@ def _label(x, y, text, color="#455a64", anchor="middle", size=10.5) -> str:
             f'fill="{color}">{text}</text>')
 
 
-def loops_svg(broken: tuple[str, ...] = ()) -> str:
+def loops_svg(broken: tuple[str, ...] = (), spms: int = 4000) -> str:
     """The tracking channel as a block diagram: the carrier loop on top (blue), the
     code loop below (green), each block named after the function that runs it.
-    `broken` lists BROKEN_BLOCKS keys to draw in red."""
-    bad = {BROKEN_BLOCKS[k][0]: BROKEN_BLOCKS[k][1] for k in broken}
+    `broken` lists BROKEN_BLOCKS keys to draw in red; `spms` is the samples per
+    millisecond named in the rounding bug's label."""
+    bad = {BROKEN_BLOCKS[k][0]: BROKEN_BLOCKS[k][1].format(spms=spms) for k in broken}
     markers = "".join(
         f'<marker id="loops-arrow-{m}" markerWidth="8" markerHeight="8" refX="7" refY="4" '
         f'orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="{c}"/></marker>'
@@ -646,8 +687,8 @@ def loops_svg(broken: tuple[str, ...] = ()) -> str:
     return "".join(p)
 
 
-def break_verdict(broken: tuple[str, ...], r: dict) -> str:
-    """One sentence on what a break-it run shows."""
+def break_verdict(broken: tuple[str, ...], r: dict, spms: int = 4000) -> str:
+    """One sentence on what a break-it run shows. `spms`: samples per millisecond."""
     lock = (f"|Q|/|I| = {r['qi']:.2f} after {TRY_SETTLE_MS} ms "
             f"({'locked' if r['locked'] else f'not locked: needs < {LOCK_QI_MAX}'})")
     if not broken:
@@ -657,7 +698,7 @@ def break_verdict(broken: tuple[str, ...], r: dict) -> str:
         why.append("With atan2, every data-bit flip looks like a half-cycle phase jump, "
                    "and the loop chases it.")
     if "rounded" in broken:
-        why.append("Each period is cut at exactly 4000 samples, while with this Doppler "
+        why.append(f"Each period is cut at exactly {spms} samples, while with this Doppler "
                    "the code repeats a fraction of a sample sooner or later, so the "
                    "replica slides off the code.")
     head = "❌ " if not r["locked"] else "⚠️ Still locked, for now: "
@@ -739,7 +780,7 @@ class TrackingTab:
             ui.label("Used by the next run.").classes("text-xs text-grey-7")
             self.c_seconds = ui.number("Seconds to track (empty: all)",
                                        value=DEFAULT_SECONDS, min=1, step=5, format="%.0f",
-                                       on_change=lambda e: self._set(seconds=e.value or None)) \
+                                       on_change=lambda e: self._set_seconds(e.value)) \
                 .classes("w-full")
             self.c_pll = ui.number("PLL bandwidth (Hz)", value=DEFAULT_PLL_BW, min=1,
                                    max=100, step=1,
@@ -905,6 +946,11 @@ class TrackingTab:
             self.settings = replace(self.settings, **clean)
             self._show_estimate()
 
+    def _set_seconds(self, value) -> None:
+        # An empty field (or 0) means the whole recording; _set would ignore None.
+        self.settings = replace(self.settings, seconds=value or None)
+        self._show_estimate()
+
     def _set_prns(self, value) -> None:
         self.settings = replace(self.settings, prns=tuple(sorted(int(p) for p in value or [])))
         self._show_estimate()
@@ -924,6 +970,7 @@ class TrackingTab:
         text = f"Tracking {n} satellite{'s' if n != 1 else ''} over {seconds:.0f} s takes {took}."
         if seconds < MIN_SECONDS_FOR_EPHEMERIS:
             text += " " + too_short_for_decode(seconds)
+        text += changed_settings_note(self.settings, len(self._detected))
         self.estimate_label.set_text(text)
 
     # --- running ------------------------------------------------------------------------
@@ -1270,7 +1317,8 @@ class TrackingTab:
             # From the coarse search bin, with the pull-in search: the problem a
             # loop faces when nothing refined its starting frequency.
             r = await run.io_bound(try_pll, x, src.fs, tr.prn, tr.seed_code_phase,
-                                   tr.coarse_doppler or tr.seed_doppler, bw)
+                                   tr.coarse_doppler if tr.coarse_doppler is not None
+                                   else tr.seed_doppler, bw)
         except (OSError, ValueError) as err:
             self.try_verdict.set_text(f"Could not track: {err}")
             return
@@ -1294,7 +1342,8 @@ class TrackingTab:
     def _break(self) -> None:
         broken = tuple(k for k, sw in (("atan2", self.break_atan2),
                                        ("rounded", self.break_rounded)) if sw.value)
-        self.break_map.set_content(loops_svg(broken))
+        tr = self.tracks.get(self.selected)
+        self.break_map.set_content(loops_svg(broken, samples_per_ms(tr) if tr else 4000))
         background_tasks.create(self._run_break(broken), name="break-it")
 
     async def _run_break(self, broken: tuple[str, ...]) -> None:
@@ -1310,13 +1359,15 @@ class TrackingTab:
             x = await self._try_samples(tr, src)
             # The real starting point (step 2's refined Doppler), so only the bug differs.
             r = await run.io_bound(try_pll, x, src.fs, tr.prn, tr.seed_code_phase,
-                                   tr.seed_doppler, DEFAULT_PLL_BW, options)
+                                   tr.seed_doppler, DEFAULT_PLL_BW, options,
+                                   not tr.seed_refined)
         except (OSError, ValueError) as err:
             self.break_verdict.set_text(f"Could not track: {err}")
             return
         if seq != self._break_seq:
             return
-        self.break_verdict.set_text(f"PRN {tr.prn}: " + break_verdict(broken, r))
+        self.break_verdict.set_text(f"PRN {tr.prn}: "
+                                    + break_verdict(broken, r, samples_per_ms(tr)))
         iq, dop = try_figures(r, tr.t0)
         self.p_break_iq.update_figure(iq)
         self.p_break_dop.update_figure(dop)

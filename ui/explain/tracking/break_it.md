@@ -17,12 +17,12 @@ Doppler wanders over more than 100 Hz.
 
 **Rounding the code period.** A code period is 1023 chips. With Doppler, the code
 arrives slightly compressed or stretched, so a period lasts a fraction of a sample
-more or less than 4000 samples. The receiver therefore processes exactly enough
+more or less than {{spms}} samples. The receiver therefore processes exactly enough
 samples to finish each period and carries the leftover fraction of a chip into the
-next one. If it cuts every period at 4000 samples instead, the replica slides off the
+next one. If it cuts every period at {{spms}} samples instead, the replica slides off the
 code a little more every millisecond. PRN 20 (2425 Hz) locks, then loses everything
 after about half a second. PRN 5 (about −90 Hz) keeps going, because its period is
-almost exactly 4000 samples. That is why, with this bug, "only PRN 5 worked".
+almost exactly {{spms}} samples. That is why, with this bug, "only PRN 5 worked".
 
 Two other decisions of NOTES.md can be switched off in the code (`TrackOptions`) but
 are not offered here, because they change nothing you could see in these plots:

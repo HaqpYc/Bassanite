@@ -153,9 +153,67 @@ def test_one_shared_run_at_a_time_and_cancel_leaves_nothing(tracked, tmp_path):
         trk._current = None
 
 
+def test_clearing_seconds_means_the_whole_recording():
+    from types import SimpleNamespace
+    tab = trk.TrackingTab()
+    tab.estimate_label = SimpleNamespace(set_text=lambda text: None)
+    tab._set_seconds(5)
+    assert tab.settings.seconds == 5
+    tab._set_seconds(None)                     # the field was emptied
+    assert tab.settings.seconds is None
+    tab._set_seconds(5)
+    tab._set_seconds(0)
+    assert tab.settings.seconds is None
+
+
+def test_changed_settings_note():
+    assert trk.changed_settings_note(trk.TrackSettings(), 5) == ""
+    note = trk.changed_settings_note(trk.TrackSettings(pll_bw=20.0, prns=(5, 7)), 5)
+    assert note == " Settings changed in Expert mode: PLL 20 Hz, 2 of 5 satellites."
+    assert "30 s" in trk.changed_settings_note(trk.TrackSettings(seconds=30), 5)
+
+
+def _fake_run(tmp_path, new_names, old_names):
+    out, target = tmp_path / "out", tmp_path / "target"
+    out.mkdir()
+    target.mkdir()
+    for name in new_names:
+        (out / name).write_text("new")
+    for name in old_names:
+        (target / name).write_text("old")
+    return trk.TrackingRun([], out, target)
+
+
+def test_finish_removes_files_of_an_earlier_run(tmp_path):
+    old = ["track_PRN05.npz", "track_PRN07.npz", "track_PRN07.png", "tracking_summary.csv",
+           "notes.txt"]
+    run = _fake_run(tmp_path, ["track_PRN05.npz", "tracking_summary.csv"], old)
+    moved = run.finish()
+    assert set(moved) == {"track_PRN05.npz", "tracking_summary.csv"}
+    left = {p.name for p in run.target.iterdir()}
+    assert left == {"track_PRN05.npz", "tracking_summary.csv", "notes.txt"}
+    assert (run.target / "track_PRN05.npz").read_text() == "new"
+
+
+def test_settle_run_reports_a_failed_move(tmp_path, monkeypatch):
+    run = _fake_run(tmp_path, ["tracking_summary.csv"], [])
+    run.proc = type("P", (), {"poll": lambda self: 0})()
+
+    def locked(src, dst):
+        raise PermissionError("file is locked")
+
+    monkeypatch.setattr(trk.shutil, "move", locked)
+    monkeypatch.setattr(trk, "_current", run)
+    before = trk.results_version
+    kind, message = trk.settle_run()
+    assert kind == "negative" and "file is locked" in message and str(run.target) in message
+    assert trk.current_run() is None and not run.out_dir.exists()
+    assert trk.results_version == before + 1
+
+
 def test_estimate_and_command():
     src = IQSource("x.bin", "int8", 4e6)
-    assert trk.estimate_minutes(30.0, 8) == pytest.approx(1.0)
+    assert trk.estimate_minutes(30.0, 8) == pytest.approx(30 * 8 * trk.SECONDS_PER_SECOND / 60)
 
 
 def test_default_tracks_the_whole_recording(tmp_path):
@@ -202,6 +260,9 @@ def test_loop_map_names_the_functions_and_marks_the_bug():
     assert "⚠" not in svg
     broken = trk.loops_svg(("atan2", "rounded"))
     assert "atan2: chases every bit flip" in broken and "rounded 4000-sample" in broken
+    assert "rounded 2000-sample" in trk.loops_svg(("rounded",), 2000)
+    r = {"qi": 0.9, "locked": False}
+    assert "exactly 2000 samples" in trk.break_verdict(("rounded",), r, 2000)
 
 
 # --- the page -------------------------------------------------------------------------------------

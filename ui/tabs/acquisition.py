@@ -29,7 +29,7 @@ from bassanite.signal_view import psd
 from bassanite.ca_code import (CODE_LENGTH, G1_FEEDBACK, G2_FEEDBACK, G2_TAPS,
                             REGISTER_STAGES, ca_code, register_states)
 from bassanite.iq_loader import load_iq
-from components import explain_panel
+from components import explain_panel, md
 from plots import DETECTED, HIGHLIGHT, LIMIT, NOISE, empty_figure, figure
 from stages import MIN_SATS_FOR_FIX, rel_path, result_is_for_other_recording
 
@@ -42,6 +42,38 @@ PERSISTENCE_CONTRAST = 2   # undetected PRNs rescanned too, to show what noise d
 LABEL_BG = "rgba(255,255,255,0.85)"   # behind plot labels that may overlap bars
 DESPREAD_MS = 10           # signal the despreading demo transforms (100 Hz bins)
 DESPREAD_SPAN_HZ = 10000.0  # frequencies shown either side of the tuned frequency
+
+# The texts of "Meet the codes". Each one sits just above the thing it describes.
+CODES_INTRO = f"""
+Every satellite sends its own **code**: a fixed list of {CODE_LENGTH} values, each +1 or −1,
+repeated without a pause. One value of the code is called a **chip**. A chip is like a
+bit, but it carries no information, because the whole list is known in advance: the
+name keeps it apart from the bits of the navigation message. A chip lasts about 1 µs
+(1.023 million chips per second), so the {CODE_LENGTH} chips take exactly 1 ms.
+"""
+CODES_MACHINE = f"""
+**G1** and **G2** are two *shift registers*: rows of {REGISTER_STAGES} boxes, called
+stages, each holding a 0 or a 1. Both start full of ones. The symbol **⊕** is **XOR**:
+the result is 1 if its two inputs differ and 0 if they are equal (with more inputs,
+1 if an odd number of them are 1). One press of *Next chip* does two things:
+
+1. **A chip comes out** (right): stage {REGISTER_STAGES} of G1 ⊕ two stages of G2, the
+   ones outlined in amber. Which two is the only difference between satellites.
+2. **Both registers shift:** every bit moves one stage to the right, and stage 1
+   receives the ⊕ of the stages marked with a dot above the register.
+"""
+CODES_WAVEFORM = f"""
+The same chips, drawn as the signal the satellite sends: a chip 0 is sent as +1 and a
+chip 1 as −1. Dark: the chips produced so far. Grey: those still to come. Only the
+first {CHIPS_SHOWN} of the {CODE_LENGTH} chips are drawn.
+"""
+CODES_MATCH = f"""
+Slide one code past another. At each shift, multiply the chips that face each other
+(+1 or −1) and add up the {CODE_LENGTH} products. Blue: the satellite's code against a
+copy of itself, which gives one tall spike when the two are aligned and almost nothing
+elsewhere. Orange: against another satellite's code, which never matches. That is how
+all the satellites share one frequency (CDMA).
+"""
 
 
 def samples_per_ms(fs: float) -> int:
@@ -564,11 +596,16 @@ def persistence_figures(p: dict, detected: list[int]) -> tuple[dict, dict]:
                          **style, "hovertemplate": f"PRN {prn}<br>%{{x:.1f}} s<br>"
                                                    "%{y:+.0f} Hz<extra></extra>"})
         chips = np.array(tr["chips"], dtype=float)
-        y = chips.tolist()
+        xs, y = list(times), chips.tolist()
         if real:   # break the line where the code phase wraps past 0 / 1023
-            y = [None if i and abs(chips[i] - chips[i - 1]) > CODE_LENGTH / 2 else c
-                 for i, c in enumerate(y)]
-        chip_data.append({"type": "scatter", "x": times, "y": y, "name": name, **style,
+            xs, y = [], []
+            for i, c in enumerate(chips.tolist()):
+                if i and abs(chips[i] - chips[i - 1]) > CODE_LENGTH / 2:
+                    xs.append(times[i])        # a gap entry: every measured point stays
+                    y.append(None)
+                xs.append(times[i])
+                y.append(c)
+        chip_data.append({"type": "scatter", "x": xs, "y": y, "name": name, **style,
                           "connectgaps": False,
                           "hovertemplate": f"PRN {prn}<br>%{{x:.1f}} s<br>%{{y:.1f}} chips"
                                            "<extra></extra>"})
@@ -668,17 +705,14 @@ class AcquisitionTab:
 
     def _build_codes(self) -> None:
         prn_options = {p: f"PRN {p}" for p in PRNS}
-        with self._card("Meet the codes",
-                        "Every satellite sends its own 1023-chip code, over and over, once "
-                        "every millisecond. Two small shift registers make it. Step through "
-                        "them to see each chip come out."):
-            with ui.row().classes("items-center gap-4"):
-                ui.select(prn_options, label="Satellite", value=self.code_prn,
-                          on_change=lambda e: self._set_code_prn(e.value)).classes("w-32")
-                ui.select(prn_options, label="Compare with", value=self.compare_prn,
-                          on_change=lambda e: self._set_compare(e.value)).classes("w-32")
+        with self._card("Meet the codes"):
+            md(CODES_INTRO).classes("text-sm")
+            ui.select(prn_options, label="Satellite", value=self.code_prn,
+                      on_change=lambda e: self._set_code_prn(e.value)).classes("w-32")
             with ui.grid().classes("w-full grid-cols-1 lg:grid-cols-2 gap-4 items-start"):
                 with ui.column().classes("w-full gap-1"):
+                    ui.label("The machine that makes the code").classes("font-medium")
+                    md(CODES_MACHINE).classes("text-sm")
                     self.lfsr = ui.html(lfsr_svg(self.code_prn, 0), sanitize=False) \
                         .classes("w-full")
                     with ui.row().classes("items-center gap-1"):
@@ -693,11 +727,13 @@ class AcquisitionTab:
                     self.chip_text = ui.label().classes("text-sm")
                     self.chips_text = ui.label().classes("text-xs font-mono break-all")
                 with ui.column().classes("w-full gap-1"):
+                    ui.label("The code it produces").classes("font-medium")
+                    md(CODES_WAVEFORM).classes("text-sm")
                     self.chips_plot = ui.plotly(chips_figure(self.code_prn, 0)).classes("w-full")
-            ui.label("Slide one code past another and add up chip × chip at each shift. "
-                     "A code matches itself only when perfectly aligned (one tall spike); "
-                     "it never matches another satellite's code. That is how many "
-                     "satellites share one frequency (CDMA).").classes("text-sm text-grey-8")
+            ui.label("Why these codes: each one matches only itself").classes("font-medium")
+            md(CODES_MATCH).classes("text-sm")
+            ui.select(prn_options, label="Compare with", value=self.compare_prn,
+                      on_change=lambda e: self._set_compare(e.value)).classes("w-32")
             self.corr_plot = ui.plotly(correlation_figure(self.code_prn, self.compare_prn)) \
                 .classes("w-full")
             explain_panel("acquisition", "codes")
