@@ -24,3 +24,8 @@ packages = ["bassanite"]
 # `python -m pytest` from the repo root runs the receiver's tests; the UI's tests
 # have their own settings (ui/pytest.ini): `python -m pytest ui`.
 testpaths = ["tests"]
+# The end-to-end test (samples in, position out) takes a few minutes: it is skipped
+# unless asked for with `python -m pytest tests -m slow`.
+markers = ["slow: generates and tracks a 20 s recording (run with -m slow)"]
+addopts = "-m 'not slow'"
+asyncio_default_fixture_loop_scope = "function"

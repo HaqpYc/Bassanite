@@ -4,6 +4,8 @@ results.py -- where each stage writes its result files: one folder per recording
     results/<recording name>/acquisition/scan_results.csv (+ .meta.json, scan_plot.png)
     results/<recording name>/tracking/tracking_summary.csv (+ .meta.json),
                                       track_PRNnn.npz, track_PRNnn.png
+    results/<recording name>/decode/navigation.json (+ .meta.json)
+    results/<recording name>/position/fix.json (+ .meta.json), fixes.csv
 
 The folder is named after the recording file (without its extension), so the
 results of several recordings live side by side, and running a stage on one never
@@ -14,11 +16,13 @@ the exact recording, which catches two recordings that share a name.
 from pathlib import Path
 
 from bassanite.acquisition import SCAN_CSV
+from bassanite.navigation import NAVIGATION_JSON
+from bassanite.position import FIX_JSON, FIXES_CSV
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_ROOT = REPO_ROOT / "results"      # tests redirect this to a temporary folder
 
-STAGE_FOLDERS = ("acquisition", "tracking")
+STAGE_FOLDERS = ("acquisition", "tracking", "decode", "position")
 
 
 def results_dir(iq_path):
@@ -38,6 +42,20 @@ def scan_csv(iq_path):
 
 def tracking_dir(iq_path):
     return stage_dir(iq_path, "tracking")
+
+
+def navigation_json(iq_path):
+    """Where stage 04 writes, and stage 05 reads, the decoded messages."""
+    return stage_dir(iq_path, "decode") / NAVIGATION_JSON
+
+
+def fix_json(iq_path):
+    """Where stage 05 writes the position."""
+    return stage_dir(iq_path, "position") / FIX_JSON
+
+
+def fixes_csv(iq_path):
+    return stage_dir(iq_path, "position") / FIXES_CSV
 
 
 def recordings_with_results():
