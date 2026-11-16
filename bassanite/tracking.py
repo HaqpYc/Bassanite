@@ -413,6 +413,7 @@ def save_track(path, prn, fs, seed, track, result):
         doppler_seed_hz=seed["doppler_hz"],
         doppler_coarse_hz=seed.get("coarse_doppler_hz", seed["doppler_hz"]),
         code_phase_samp_seed=seed["code_phase_samp"],
+        seed_refined=bool(seed.get("refined", False)),
     )
     return path
 
@@ -422,7 +423,10 @@ def load_track(path):
     q_prompt, doppler_hz, code_phase_samp), nav_bits, cn0_dbhz, the scalars prn,
     fs, bit_offset, doppler_seed_hz (where the carrier loop started),
     doppler_coarse_hz (acquisition's search-grid Doppler), code_phase_samp_seed,
-    and `detail` (the DETAIL_KEYS arrays, or None for files saved without them)."""
+    seed_refined (True if acquisition had already refined the Doppler, so the run
+    skipped the pull-in search; inferred for older files from the two Dopplers
+    differing), and `detail` (the DETAIL_KEYS arrays, or None for files saved
+    without them)."""
     with np.load(path) as d:
         out = {k: d[k] for k in ("i_prompt", "q_prompt", "doppler_hz", "code_phase_samp",
                                  "nav_bits", "cn0_dbhz")}
@@ -432,6 +436,9 @@ def load_track(path):
         out["doppler_coarse_hz"] = (float(d["doppler_coarse_hz"])
                                     if "doppler_coarse_hz" in d.files
                                     else out["doppler_seed_hz"])
+        out["seed_refined"] = (bool(d["seed_refined"]) if "seed_refined" in d.files
+                               else "doppler_coarse_hz" in d.files
+                               and out["doppler_coarse_hz"] != out["doppler_seed_hz"])
         out["detail"] = ({k: d[k] for k in DETAIL_KEYS}
                          if all(k in d.files for k in DETAIL_KEYS) else None)
     return out

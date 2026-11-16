@@ -109,12 +109,12 @@ class IQReader:
     def _raw(self, a, b):
         """Samples a..b of the window, scaled but not DC-corrected."""
         if self.fmt == "int8":
-            raw = self._mm[2 * (self._start + a):2 * (self._start + b)]
-            x = np.empty(raw.size // 2, dtype=np.complex64)
-            x.real = raw[0::2]
-            x.imag = raw[1::2]
-            x /= 128.0
-            return x
+            # Convert I and Q together, then read each (I, Q) pair of floats as one
+            # complex number: the same values as load_iq's separate fills, in about
+            # half the time, which matters when tracking does it every 1 ms.
+            pairs = self._mm[2 * (self._start + a):2 * (self._start + b)].astype(np.float32)
+            pairs *= np.float32(1 / 128)                # exact: a power of two
+            return pairs.view(np.complex64)
         return np.array(self._mm[self._start + a:self._start + b], dtype=np.complex64)
 
     def _mean(self, chunk=4_000_000):

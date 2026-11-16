@@ -91,9 +91,18 @@ def refine_doppler(x, fs, prn, doppler, code_phase, nms, span_hz, step_hz=FINE_S
     matter). Acquisition hands this to tracking: a narrow carrier loop cannot pull
     in the error of up to half a search bin on its own."""
     dops = np.arange(doppler - span_hz, doppler + span_hz + step_hz / 2, step_hz)
-    surf = correlation_surface(x, fs, prn, dops, min(nms, len(x) // int(round(fs * 1e-3))))
-    cols = (int(round(code_phase)) + np.arange(-1, 2)) % surf.shape[1]
-    return float(dops[surf[:, cols].max(axis=1).argmax()])
+    spms = int(round(fs * 1e-3))
+    nms_used = min(nms, len(x) // spms)
+    # Only 3 code phases matter, so skip the FFTs of a full surface: correlate each
+    # ms with the 3 shifted codes directly, all Dopplers in one matrix product.
+    segs = np.asarray(x[:nms_used * spms]).reshape(nms_used, spms)
+    code = upsample_code(prn, spms).astype(np.float64)
+    cols = (int(round(code_phase)) + np.arange(-1, 2)) % spms
+    rows = np.concatenate([segs * np.roll(code, c) for c in cols])   # (3 * nms_used, spms)
+    carriers = np.exp(-2j * np.pi * (np.arange(spms) / fs)[:, None] * dops[None, :])
+    power = np.abs(rows @ carriers) ** 2                             # (3 * nms_used, n_dops)
+    power = power.reshape(len(cols), nms_used, len(dops)).sum(axis=1)  # sum over the ms
+    return float(dops[power.max(axis=0).argmax()])
 
 
 def scan(x, fs, dop_min, dop_max, dop_step, nms, threshold, prns=range(1, 33),
@@ -191,9 +200,10 @@ def cn0_from_peak(peak_over_mean, coherent_s=1e-3):
 # --- persistence: is a detection real? ------------------------------------------------
 
 def window_start(duration_s, skip_s, nms):
-    """`skip_s`, moved back if needed so a scan integrating `nms` ms fits in a
-    recording of `duration_s` seconds."""
-    return min(max(skip_s, 0.0), max(duration_s - seconds_needed(nms), 0.0))
+    """`skip_s`, moved back if needed so what `scan` loads (scan_seconds: the search
+    plus the 40 ms Doppler refinement) fits in a recording of `duration_s` seconds.
+    A recording shorter than that starts at 0 and uses what there is."""
+    return min(max(skip_s, 0.0), max(duration_s - scan_seconds(nms), 0.0))
 
 
 def drift_tolerance(times):
@@ -218,7 +228,7 @@ def persistence(iq_path, fmt, fs, search, prns, detected, points=5, progress=Non
     """
     dop_min, dop_max, dop_step, nms = search
     duration = len(open_iq(iq_path, fmt, fs, remove_dc=False)) / fs
-    last = max(duration - seconds_needed(nms), 0.0)
+    last = max(duration - scan_seconds(nms), 0.0)     # the last window keeps its 40 ms
     times = np.unique(np.round(np.linspace(0.0, last, points), 3))
     tracks = {prn: {"doppler": [], "chips": [], "ratio": []} for prn in prns}
     total, done = len(times) * len(prns), 0

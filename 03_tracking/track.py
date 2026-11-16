@@ -69,6 +69,18 @@ from bassanite.ca_code import CODE_LENGTH
 from bassanite.iq_loader import open_iq
 
 
+def plots_available():
+    """True if matplotlib (the optional `plots` extra) can be imported. If not,
+    say so once and let the run go on without diagnostic PNGs."""
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        print("plots skipped: matplotlib is not installed "
+              '(pip install -e ".[plots]")')
+        return False
+    return True
+
+
 def write_plot(out_dir, prn, fs, track, cn0):
     import matplotlib
     matplotlib.use("Agg")
@@ -186,6 +198,7 @@ def main():
     total_ms = int(x.size / a.fs * 1000)
     if max_ms is not None:
         total_ms = min(total_ms, max_ms)
+    make_plots = not a.no_plot and plots_available()     # checked once, not per satellite
     summary = []
     for k, s in enumerate(seeds, start=1):
         prn = s["prn"]
@@ -204,7 +217,7 @@ def main():
             print(f"  PRN {prn:>2}: too few epochs ({len(tr['i_prompt'])}), skipped")
             continue
         save_track(os.path.join(a.out_dir, track_file_name(prn)), prn, a.fs, s, tr, r)
-        if not a.no_plot:
+        if make_plots:
             write_plot(a.out_dir, prn, a.fs, tr, r["cn0"])
         summary.append(summary_row(prn, tr, r))
         lock_txt = "LOCK" if r["locked"] else "weak"
