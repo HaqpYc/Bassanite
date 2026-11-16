@@ -1,5 +1,6 @@
 ---
 title: From distances to a position
+code: bassanite/position.py::fix_series, bassanite/position.py::summarize
 ---
 ## Intuition
 
@@ -15,6 +16,9 @@ clock error becomes a fourth unknown, and we need a fourth satellite. These
 
 The equations aren't linear, so the solver starts from a guess (even the centre of
 the Earth works) and improves it a few times until it stops moving.
+
+One position uses one instant of the recording. We compute one every 100 ms: their
+mean is the answer, and their scatter shows how precise one measurement is.
 
 ## Math
 
@@ -35,6 +39,6 @@ $$\Delta \rho_i \approx -\mathbf{u}_i^{\mathsf{T}} \Delta \mathbf{r} + c\,\Delta
 
 $$\Delta \mathbf{x} = \left( H^{\mathsf{T}} H \right)^{-1} H^{\mathsf{T}}\, \Delta \boldsymbol{\rho}$$
 
-**Dilution of precision (DOP)**: the diagonal of $(H^{\mathsf{T}} H)^{-1}$ shows
-how much the satellite geometry amplifies range errors. Satellites spread across the
-sky give a small DOP.
+**The mean of $N$ positions** has a random error $\sqrt{N}$ times smaller than one
+position, if their errors are independent. Errors common to all of them (the
+atmosphere, the orbits) do not average out.

@@ -6,8 +6,12 @@ from collections.abc import Callable
 from nicegui import ui
 
 from components import md
-from stages import STAGES, furthest_done, results_history, stage_status
+from stages import (STAGE_BY_KEY, STAGES, furthest_done, position_text, results_history,
+                    stage_status)
 from state import IQSource, default_source, state
+
+from bassanite.position import load_fix
+from bassanite.results import fix_json
 
 INTRO = """
 **Bassanite turns raw radio samples into a GPS position, one visible step at a time.**
@@ -53,7 +57,18 @@ def _input_card(open_source_dialog: Callable[[], None],
             .classes("text-xs text-grey-7")
 
 
-def _result_card() -> None:
+def _saved_position() -> dict | None:
+    """The position computed for the loaded recording (fix.json's summary), if any."""
+    stage = STAGE_BY_KEY["position"]
+    if state.source is None or stage_status(stage, state.source).state != "done":
+        return None
+    try:
+        return load_fix(fix_json(state.source.path))["summary"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _result_card(go_to: Callable[[str], None]) -> None:
     with ui.card().classes("flex-1 min-w-[16rem]").props("flat bordered"):
         ui.label("Result").classes("text-subtitle1 font-bold")
         last = furthest_done(state.source)
@@ -61,12 +76,22 @@ def _result_card() -> None:
             ui.label("Nothing computed yet. Start by loading a recording.") \
                 .classes("text-grey-7")
             return
+        position = _saved_position()
+        if position is not None:
+            ui.label("📍 " + position_text(position)).classes("text-h6")
+            ui.label(f"From {len(position['satellites'])} satellites; one position "
+                     f"scatters by {position['horizontal_rms']:.0f} m horizontally.") \
+                .classes("text-grey-8")
+            ui.button("See how it was computed", on_click=lambda: go_to("position")) \
+                .props("flat dense no-caps")
+            return
         status = stage_status(last, state.source)
         ui.label(f"Furthest step reached: {last.number} · {last.title}")
         ui.label(status.summary).classes("text-grey-8")
-        if last.number < len(STAGES):
-            ui.label("A position needs stages 4 (Decode) and 5 (Position), which are "
-                     "not built yet.").classes("text-xs text-grey-7")
+        nxt = STAGES[last.number] if last.number < len(STAGES) else None
+        if nxt is not None:
+            ui.button(f"Next: step {nxt.number}, {nxt.title}",
+                      on_click=lambda: go_to(nxt.key)).props("flat dense no-caps")
 
 
 def _history_card(on_changed: Callable[[], None]) -> None:
@@ -139,6 +164,6 @@ def overview(go_to: Callable[[str], None], open_source_dialog: Callable[[], None
         _pipeline(go_to)
         with ui.row().classes("w-full items-stretch gap-4"):
             _input_card(open_source_dialog, go_to)
-            _result_card()
+            _result_card(go_to)
             _history_card(on_changed)
         _first_run_checklist(open_source_dialog, on_changed, go_to)

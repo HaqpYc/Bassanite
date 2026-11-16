@@ -11,6 +11,8 @@ from pathlib import Path
 from state import REPO_ROOT, IQSource
 
 from bassanite.acquisition import read_results
+from bassanite.navigation import load_navigation
+from bassanite.position import load_fix
 from bassanite.provenance import read_meta, same_recording
 from bassanite.results import recordings_with_results, results_dir
 from bassanite.tracking import read_summary
@@ -43,10 +45,13 @@ STAGES: tuple[Stage, ...] = (
           "For each locked satellite: the 1 kHz prompt correlator, Doppler and code "
           "phase, and the 50 bit/s navigation bits.",
           ("tracking/tracking_summary.csv", "tracking/track_PRN*.npz")),
-    Stage("decode", 4, "Decode", "Read the satellites' messages", False,
-          "Each satellite's orbit (ephemeris), clock corrections and transmit time."),
-    Stage("position", 5, "Position", "Distances → your position", False,
-          "Latitude, longitude, altitude and the receiver clock error."),
+    Stage("decode", 4, "Decode", "Read the satellites' messages", True,
+          "For each satellite with a complete message: its orbit (ephemeris), its clock "
+          "correction, and the satellite time of one known instant of the recording.",
+          ("decode/navigation.json",)),
+    Stage("position", 5, "Position", "Distances → your position", True,
+          "Latitude, longitude, height, and the time: the end of the chain.",
+          ("position/fix.json", "position/fixes.csv")),
 )
 
 STAGE_BY_KEY = {s.key: s for s in STAGES}
@@ -118,6 +123,54 @@ def _tracking_status(path: Path) -> StageStatus:
     return StageStatus("done", summary, f"from {rel_path(path)}")
 
 
+def _decode_status(path: Path) -> StageStatus:
+    if not path.is_file():
+        return StageStatus("locked", "Not run yet")
+    try:
+        sats = load_navigation(path)
+    except (OSError, ValueError, KeyError):
+        return StageStatus("attention", "Could not read the decoded messages",
+                           f"from {rel_path(path)}")
+    good = sorted(prn for prn, sat in sats.items() if sat["usable"])
+    detail = f"from {rel_path(path)}"
+    if not good:
+        return StageStatus("attention", "No satellite has a complete message", detail)
+    summary = (f"{len(good)} of {len(sats)} messages complete "
+               f"(PRN {', '.join(map(str, good))})")
+    if len(good) < MIN_SATS_FOR_FIX:
+        return StageStatus("attention", f"{summary}: a fix needs {MIN_SATS_FOR_FIX}", detail)
+    return StageStatus("done", summary, detail)
+
+
+def position_text(summary: dict) -> str:
+    """A position as text: 51.47790° N, 0.00150° W, 46 m."""
+    lat, lon = summary["lat"], summary["lon"]
+    return (f"{abs(lat):.5f}° {'N' if lat >= 0 else 'S'}, "
+            f"{abs(lon):.5f}° {'E' if lon >= 0 else 'W'}, {summary['height']:.0f} m")
+
+
+def _position_status(path: Path) -> StageStatus:
+    if not path.is_file():
+        return StageStatus("locked", "Not run yet")
+    try:
+        summary = load_fix(path)["summary"]
+        text = f"{position_text(summary)} ({len(summary['satellites'])} satellites)"
+    except (OSError, ValueError, KeyError):
+        return StageStatus("attention", "Could not read the position", f"from {rel_path(path)}")
+    return StageStatus("done", text, f"from {rel_path(path)}")
+
+
+def older_than_previous_step(stage: Stage, source: IQSource) -> bool:
+    """True when the step before `stage` was run again after it: its results no
+    longer match what they were computed from."""
+    previous = STAGES[stage.number - 2]
+    if not previous.output_files:
+        return False
+    mine, theirs = _main_result(stage, source), _main_result(previous, source)
+    return (mine.is_file() and theirs.is_file()
+            and mine.stat().st_mtime < theirs.stat().st_mtime)
+
+
 def result_is_for_other_recording(result_path: Path, source: IQSource) -> bool:
     """True when a result file was made from another recording than `source`.
 
@@ -149,6 +202,10 @@ def stage_status(stage: Stage, source: IQSource | None) -> StageStatus:
         status = _acquisition_status(path)
     elif stage.key == "tracking":
         status = _tracking_status(path)
+    elif stage.key == "decode":
+        status = _decode_status(path)
+    elif stage.key == "position":
+        status = _position_status(path)
     else:
         raise ValueError(f"no status rule for stage {stage.key!r}")
     if status.state != "locked" and result_is_for_other_recording(path, source):
@@ -156,6 +213,12 @@ def stage_status(stage: Stage, source: IQSource | None) -> StageStatus:
                            f"Results in {rel_path(path.parent)} are for "
                            f"{results_source_name(path)}, another file with the same "
                            f"name: run this step on {source.path.name}", status.detail)
+    if status.state != "locked" and stage.key in ("decode", "position") \
+            and older_than_previous_step(stage, source):
+        previous = STAGES[stage.number - 2]
+        return StageStatus("attention",
+                           f"Step {previous.number} ({previous.title}) was run again since: "
+                           f"run this step again", status.detail)
     return status
 
 

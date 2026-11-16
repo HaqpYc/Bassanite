@@ -24,6 +24,8 @@ from state import state
 from tabs.acquisition import AcquisitionTab
 from tabs.overview import overview
 from tabs.capture import CapturePanel
+from tabs.decode import DecodeTab
+from tabs.position import PositionTab
 from tabs.signal import SignalTab
 from tabs.tracking import TrackingTab, stop_all_runs
 
@@ -52,11 +54,13 @@ def root() -> None:
     tab_refs: dict[str, ui.tab] = {}
     signal_tab = SignalTab()
     signal_tab.capture_panel = CapturePanel(signal_tab, on_recorded=lambda: refresh())
-    # Tabs that have real content; the others show placeholders.
     acquisition_tab = AcquisitionTab(on_scanned=lambda: refresh())
     tracking_tab = TrackingTab(go_to=lambda key: go_to(key), on_tracked=lambda: refresh())
+    decode_tab = DecodeTab(go_to=lambda key: go_to(key), on_decoded=lambda: refresh())
+    position_tab = PositionTab(go_to=lambda key: go_to(key), on_solved=lambda: refresh())
     tab_content = {"signal": signal_tab.build, "acquisition": acquisition_tab.build,
-                   "tracking": tracking_tab.build}
+                   "tracking": tracking_tab.build, "decode": decode_tab.build,
+                   "position": position_tab.build}
 
     def go_to(key: str) -> None:
         tabs.set_value(key)
@@ -78,6 +82,8 @@ def root() -> None:
         signal_tab.request_update()
         acquisition_tab.request_update()
         tracking_tab.request_update()
+        decode_tab.request_update()
+        position_tab.request_update()
 
     def open_source_dialog() -> None:
         source_dialog(on_loaded=refresh).open()
